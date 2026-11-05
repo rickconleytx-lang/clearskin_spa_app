@@ -57,6 +57,81 @@ PUBLIC_WEBSITE_DEFAULTS = {
 }
 
 
+
+PEACHPOS_WEBSITE_STYLE_DEFAULTS = {
+    "general": {
+        "website_tagline": "Something for Everyone.",
+        "hero_description": (
+            "Discover our products, offerings, and what "
+            "makes our business special."
+        ),
+        "intro_heading": "Discover what makes us different",
+        "intro_description": (
+            "Explore our offerings and find what fits "
+            "your needs."
+        ),
+        "about_description": (
+            "We're proud to offer quality products and "
+            "experiences for our customers."
+        ),
+    },
+    "food": {
+        "website_tagline": "Fresh Food. Great Moments.",
+        "hero_description": (
+            "Explore our menu and discover what's cooking!"
+        ),
+        "intro_heading": "Great food, made for you",
+        "intro_description": (
+            "Browse our food and drink options and "
+            "discover something delicious."
+        ),
+        "about_description": (
+            "We love serving great food and bringing "
+            "people together."
+        ),
+    },
+    "retail": {
+        "website_tagline": "Discover Something Great.",
+        "hero_description": (
+            "Browse our products and explore what "
+            "we have to offer."
+        ),
+        "intro_heading": "Find your next favorite",
+        "intro_description": (
+            "Discover products selected with our "
+            "customers in mind."
+        ),
+        "about_description": (
+            "We're here to help you find products "
+            "you'll love."
+        ),
+    },
+}
+
+
+def resolve_peachpos_website_defaults(settings, style):
+    """
+    Adapt only recognizable default text for PeachPOS.
+
+    Custom text is preserved. This function does not
+    write to the database or mutate the original dict.
+    """
+    defaults = PEACHPOS_WEBSITE_STYLE_DEFAULTS
+    selected = defaults.get(style, defaults["general"])
+    resolved = dict(settings)
+
+    for field, replacement in selected.items():
+        known_defaults = {
+            PUBLIC_WEBSITE_DEFAULTS[field],
+            *(values[field] for values in defaults.values()),
+        }
+
+        if resolved.get(field) in known_defaults:
+            resolved[field] = replacement
+
+    return resolved
+
+
 DEFAULT_CLIENT_STATUSES = (
     "Current",
     "Previous",

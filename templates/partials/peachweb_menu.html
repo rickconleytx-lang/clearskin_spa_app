@@ -1,0 +1,63 @@
+<div class="user-menu app-menu-category">
+
+    <button type="button"
+            class="user-menu-button app-menu-category-button"
+            onclick="toggleOnlineBookingMenu()"
+            aria-controls="onlineBookingMenuDropdown"
+            aria-expanded="false">
+
+        <span class="app-menu-category-main">
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">🌐</span>
+
+            <span class="app-menu-category-label">
+                PeachWeb
+            </span>
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">›</span>
+    </button>
+
+    <div id="onlineBookingMenuDropdown"
+         class="user-menu-dropdown app-menu-submenu"
+         style="display:none;">
+
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                🌐 PeachWeb Management
+            </div>
+
+            <a href="{{ url_for('public_website_settings') }}">
+                <span aria-hidden="true">⚙️</span>
+                <span>Website Settings</span>
+            </a>
+
+            <a href="{{ url_for('public_website_menu_items') }}">
+                <span aria-hidden="true">🍽️</span>
+                <span>Website Menu Items</span>
+            </a>
+
+            <a href="{{ url_for('public_website_links') }}">
+                <span aria-hidden="true">🔗</span>
+                <span>Website Links</span>
+            </a>
+
+            {% if public_website_url is defined
+                  and public_website_url %}
+
+                <a href="{{ public_website_url }}"
+                   target="_blank"
+                   rel="noopener">
+                    <span aria-hidden="true">🌐</span>
+                    <span>View Website</span>
+                </a>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+</div>

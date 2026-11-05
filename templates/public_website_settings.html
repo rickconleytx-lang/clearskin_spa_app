@@ -6,6 +6,19 @@
 
 {% block content %}
 
+{% set peachpos_style = settings.website_display_style|default('general') %}
+{% set peachpos_section_name =
+    'Food & Drink Menu' if peachpos_style == 'food'
+    else 'Product Catalog' if peachpos_style == 'retail'
+    else 'Products & Offerings'
+%}
+{% set peachpos_items_name =
+    'Menu Items' if peachpos_style == 'food'
+    else 'Catalog Items' if peachpos_style == 'retail'
+    else 'Website Items'
+%}
+
+
 <style>
     .website-settings-page {
         max-width: 900px;
@@ -194,12 +207,14 @@
             Admin / Setup
         </a>
 
-        <a
+        {% if navigation_subscription_tier_code != "pos" %}
+<a
             href="{{ url_for('service_types') }}"
             class="tool-pill tool-pill-small"
         >
             Service Catalog
         </a>
+{% endif %}
 
         <a
             href="{{ public_website_url }}"
@@ -225,10 +240,14 @@
             on the public business website.
         </p>
 
-        <p>
+        {% if navigation_subscription_tier_code == "pos" %}
+<p>Manage your {{ peachpos_section_name|lower }} listings, descriptions, and prices using PeachWeb {{ peachpos_items_name }}.</p>
+{% else %}
+<p>
             Service names, descriptions, visibility, and display
             order are managed separately in the Service Catalog.
         </p>
+{% endif %}
 
     </div>
 
@@ -247,9 +266,35 @@
             </p>
 
             <p>
-                You can return to this page at your convenience to review
-                and customize your website colors, headings, descriptions,
-                and other settings.
+                You can customize your website colors, headings,
+                descriptions, and other settings now or return later.
+            </p>
+
+            <p>
+                <strong>If you make changes during setup:</strong>
+            </p>
+
+            <ol style="text-align:left; max-width:600px; margin:12px auto;">
+                <li>
+                    Click <strong>Save Changes</strong>
+                    at the bottom of this page.
+                </li>
+                <li>
+                    After saving, select
+                    <strong>Menu &rarr; Daily Briefing</strong>.
+                </li>
+                <li>
+                    Click <strong>Continue Setup</strong> to return
+                    to this step, then click
+                    <strong>Continue with Setup</strong>
+                    to advance to the next step.
+                </li>
+            </ol>
+
+            <p>
+                <strong>If no changes are needed,</strong>
+                simply click <strong>Continue with Setup</strong>
+                below to proceed.
             </p>
 
             <form
@@ -280,6 +325,105 @@
     <div class="website-settings-card">
 
         <form method="POST">
+
+            <section class="website-settings-section">
+                <h2>Website Identity</h2>
+
+                <div class="website-settings-field">
+                    <label for="website_display_name">
+                        Business Name
+                    </label>
+
+                    <input
+                        type="text"
+                        id="website_display_name"
+                        name="website_display_name"
+                        maxlength="180"
+                        value="{{ settings.website_display_name|default('', true)|e }}"
+                    >
+
+                    <span class="website-settings-help">
+                        The name displayed on your public PeachWeb
+                        website. Changing this does not change your
+                        registered Peach Suite Pro business name.
+                    </span>
+                </div>
+
+                <div class="website-settings-field">
+                    <label for="website_display_initials">
+                        Business Initials (Optional)
+                    </label>
+
+                    <input
+                        type="text"
+                        id="website_display_initials"
+                        name="website_display_initials"
+                        maxlength="4"
+                        pattern="[A-Za-z0-9]{1,4}"
+                        value="{{ settings.website_display_initials|default('', true)|e }}"
+                        placeholder="{{ settings.website_auto_initials|default('PS')|e }}"
+                        autocapitalize="characters"
+                    >
+
+                    <span class="website-settings-help">
+                        Enter 1–4 letters or numbers to customize
+                        the initials displayed on your website.
+                        Leave blank to automatically generate initials
+                        from your Website Business Name.
+                    </span>
+                </div>
+            </section>
+
+{% if settings.website_display_style is defined %}
+        <fieldset id="peachpos-display-style"
+                  class="website-settings-section"
+                  style="border:0; padding:0;">
+
+            <legend style="font-size:1.25rem;
+                           font-weight:700;">
+                Website Display Style
+            </legend>
+
+            <p>
+                Choose how your offerings appear on
+                PeachWeb. You can change this later.
+            </p>
+
+            {% for value, title, description in [
+                ('general', 'Products & Offerings',
+                 'General vendors and mixed businesses'),
+                ('food', 'Food & Drink Menu',
+                 'Food trucks, bakeries and restaurants'),
+                ('retail', 'Product Catalog',
+                 'Clothing, merchandise and retail vendors')
+            ] %}
+            <label style="display:block; margin:12px 0;
+                          padding:14px;
+                          border:1px solid #ddd;
+                          border-radius:8px;
+                          cursor:pointer;">
+
+                <input type="radio"
+                       name="website_display_style"
+                       value="{{ value }}"
+                       style="width:auto;"
+                       {% if settings.website_display_style == value %}
+                       checked
+                       {% endif %}>
+
+                <strong>{{ title }}</strong>
+
+                <span style="display:block;
+                             margin-left:25px;
+                             color:#666;">
+                    {{ description }}
+                </span>
+            </label>
+            {% endfor %}
+        </fieldset>
+        {% endif %}
+
+
 
             {% if onboarding_requested %}
                 <input
@@ -668,7 +812,9 @@
                         maxlength="180"
                         value="{{ settings.hero_headline }}"
                         required
+                        {% if navigation_subscription_tier_code != "pos" and not onboarding_requested %}
                         autofocus
+                        {% endif %}
                     >
 
                     <span class="website-settings-help">
@@ -984,6 +1130,7 @@
 
             </section>
 
+{% if navigation_subscription_tier_code != "pos" %}
             <section class="website-settings-section">
 
                 <h2>Services Section</h2>
@@ -1038,8 +1185,10 @@
                 </div>
 
             </section>
+{% endif %}
 
 
+{% if navigation_subscription_tier_code != "pos" %}
             <section class="website-settings-section">
 
                 <h2>Services Two Section</h2>
@@ -1119,8 +1268,10 @@
                 </span>
 
             </section>
+{% endif %}
 
 
+{% if navigation_subscription_tier_code != "pos" %}
             <section class="website-settings-section">
 
                 <h2>Services Three Section</h2>
@@ -1200,18 +1351,23 @@
                 </span>
 
             </section>
+{% endif %}
 
 
             <section class="website-settings-section">
 
-                <h2>Additional Add-ons &amp; Menu</h2>
+                <h2>{% if navigation_subscription_tier_code == "pos" %}{{ peachpos_section_name }}{% else %}Additional Add-ons &amp; Menu{% endif %}</h2>
 
-                <p>
+                {% if navigation_subscription_tier_code == "pos" %}
+<p>Customize your {{ peachpos_section_name|lower }} section on PeachWeb. Add items, descriptions, and prices using {{ peachpos_items_name }}.</p>
+{% else %}
+<p>
                     Display a separate optional price menu
                     below Featured Services. Menu items are
                     managed independently from the Service
                     Catalog.
                 </p>
+{% endif %}
 
 
                 <div class="website-settings-field">
@@ -1237,8 +1393,7 @@
                             for="show_additional_menu_section"
                         >
                             <strong>
-                                Show Additional Add-ons
-                                &amp; Menu on Website
+                                {% if navigation_subscription_tier_code == "pos" %}Show {{ peachpos_section_name }} on Website{% else %}Show Additional Add-ons &amp; Menu on Website{% endif %}
                             </strong>
                         </label>
 
@@ -1294,7 +1449,7 @@
                         }}"
                         class="tool-pill tool-pill-small"
                     >
-                        Manage Menu Items
+                        {% if navigation_subscription_tier_code == "pos" %}Manage {{ peachpos_items_name }}{% else %}Manage Menu Items{% endif %}
                     </a>
 
                 </div>
@@ -1392,6 +1547,7 @@
             </section>
 
 
+{% if navigation_subscription_tier_code != "pos" %}
             <section class="website-settings-section">
 
                 <h2>Booking Section</h2>
@@ -1430,8 +1586,10 @@
                 </div>
 
             </section>
+{% endif %}
 
 
+{% if navigation_subscription_tier_code != "pos" %}
             <section class="website-settings-section">
 
                 <h2>Appointment Support Contact</h2>
@@ -1486,6 +1644,7 @@
                 </div>
 
             </section>
+{% endif %}
 
 
             <div class="website-settings-actions">
@@ -1499,7 +1658,8 @@
                     Save Changes
                 </button>
 
-                <button
+                {% if navigation_subscription_tier_code != "pos" %}
+<button
                     type="submit"
                     name="action"
                     value="reset"
@@ -1512,6 +1672,7 @@
                 >
                     Reset to Defaults
                 </button>
+{% endif %}
 
             </div>
 

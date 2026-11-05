@@ -1,7 +1,45 @@
 {% extends "base.html" %}
 
+{% set pos_term_options = {
+    'general': {
+        'heading': 'Manage Offerings',
+        'coach': 'PeachWeb Offerings',
+        'view': 'View Website Offerings',
+        'add': 'Add Offering',
+        'column': 'Offering',
+        'description': 'Manage offerings, prices, and visibility on your public PeachWeb website.',
+        'onboarding': 'Review the offerings you would like to display on your PeachWeb website.',
+        'empty': 'No offerings match this view.'
+    },
+    'food': {
+        'heading': 'Manage Menu Items',
+        'coach': 'PeachWeb Menu',
+        'view': 'View Website Menu',
+        'add': 'Add Menu Item',
+        'column': 'Menu Item',
+        'description': 'Manage food and drink items, prices, and visibility on your public menu.',
+        'onboarding': 'Review the food and drink items you would like to display on your PeachWeb menu.',
+        'empty': 'No menu items match this view.'
+    },
+    'retail': {
+        'heading': 'Manage Catalog Items',
+        'coach': 'PeachWeb Catalog',
+        'view': 'View Website Catalog',
+        'add': 'Add Catalog Item',
+        'column': 'Catalog Item',
+        'description': 'Manage catalog items, prices, and visibility on your public product catalog.',
+        'onboarding': 'Review the products you would like to display in your PeachWeb catalog.',
+        'empty': 'No catalog items match this view.'
+    }
+} %}
+{% set pos_terms = pos_term_options.get(
+    website_display_style|default('general'),
+    pos_term_options['general']
+) %}
+
+
 {% block title %}
-Additional Add-ons & Menu | Peach Suite Pro
+{{ pos_terms.heading if is_peachpos else 'Additional Add-ons & Menu' }} | Peach Suite Pro
 {% endblock %}
 
 {% block content %}
@@ -76,6 +114,44 @@ Additional Add-ons & Menu | Peach Suite Pro
 
 <div class="menu-manager-page">
 
+{% if onboarding_requested %}
+<div id="peachpos-menu-onboarding"
+     class="dashboard-card"
+     style="margin-bottom:24px;">
+
+    <h2>🍑 Coach Peach Setup — {{ pos_terms.coach if is_peachpos else 'PeachWeb Menu' }}</h2>
+
+    <p>
+        {{ pos_terms.onboarding if is_peachpos else 'Review the additional menu items that can appear on your PeachWeb website.' }}
+    </p>
+
+    <p>
+        You may add items now or return later.
+        {{ 'No items are required to continue setup.' if is_peachpos else 'No menu entries are required to continue setup.' }}
+    </p>
+
+    <form method="POST"
+          action="{{ url_for(
+              'complete_website_menu_items_onboarding'
+          ) }}">
+
+        <input
+            type="hidden"
+            name="security_csrf_token"
+            value="{{ security_csrf_token }}"
+        >
+
+        <button type="submit" class="btn">
+            Continue with Setup
+        </button>
+
+    </form>
+
+</div>
+{% endif %}
+
+
+
     <div class="page-tool-pills">
 
         <a
@@ -91,21 +167,19 @@ Additional Add-ons & Menu | Peach Suite Pro
             target="_blank"
             rel="noopener"
         >
-            View Website Menu
+            {{ pos_terms.view if is_peachpos else 'View Website Menu' }}
         </a>
 
     </div>
 
 
     <div class="page-title">
-        <h1>Additional Add-ons &amp; Menu</h1>
+        <h1>{{ pos_terms.heading if is_peachpos else 'Additional Add-ons & Menu' }}</h1>
     </div>
 
 
     <p>
-        Manage optional add-ons, enhancements, and
-        other price-menu items shown below Featured
-        Services on the public website.
+        {{ pos_terms.description if is_peachpos else 'Manage optional add-ons, enhancements, and other price-menu items shown below Featured Services on the public website.' }}
     </p>
 
 
@@ -134,7 +208,7 @@ Additional Add-ons & Menu | Peach Suite Pro
             }}"
             class="tool-pill tool-pill-small"
         >
-            Add Menu Item
+            {{ pos_terms.add if is_peachpos else 'Add Menu Item' }}
         </a>
 
     </div>
@@ -189,7 +263,7 @@ Additional Add-ons & Menu | Peach Suite Pro
 
                 <thead>
                     <tr>
-                        <th>Menu Item</th>
+                        <th>{{ pos_terms.column if is_peachpos else 'Menu Item' }}</th>
                         <th>Price</th>
                         <th>Display Order</th>
                         <th>Status</th>
@@ -312,7 +386,7 @@ Additional Add-ons & Menu | Peach Suite Pro
     {% else %}
 
         <div class="empty-state">
-            No menu items match this view.
+            {{ pos_terms.empty if is_peachpos else 'No menu items match this view.' }}
         </div>
 
     {% endif %}

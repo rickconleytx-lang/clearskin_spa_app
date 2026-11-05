@@ -479,6 +479,7 @@
         {% set has_business_navigation = (
             nav_access.can_view_calendar
             or nav_access.can_manage_online_booking
+            or nav_access.can_manage_public_website
             or nav_access.can_view_communications
             or nav_access.can_view_clients
             or nav_access.can_view_inventory
@@ -550,13 +551,26 @@
         {% endif %}
 
 
-        {% if nav_access.can_view_calendar %}
+        {% if nav_access.can_view_calendar and navigation_subscription_tier_code != "pos" %}
             {% include "partials/calendar_menu.html" %}
         {% endif %}
 
 
-        {% if nav_access.can_manage_online_booking %}
+        {% if (
+            nav_access.can_manage_online_booking
+            and "appointments" in subscription_entitlements
+            and navigation_subscription_tier_code != "pos"
+        ) %}
+
             {% include "partials/online_booking_menu.html" %}
+
+        {% elif (
+            nav_access.can_manage_public_website
+            and "peachweb" in subscription_entitlements
+        ) %}
+
+            {% include "partials/peachweb_menu.html" %}
+
         {% endif %}
 
 

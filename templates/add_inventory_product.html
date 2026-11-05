@@ -10,7 +10,7 @@
         <div>
             <h1>Add Inventory Product</h1>
             <p class="page-subtitle">
-                Add a new retail or backbar inventory item
+                Add a product or supply item to track in inventory.
             </p>
         </div>
 
@@ -21,7 +21,54 @@
         </div>
     </div>
 
-    <form method="POST" class="styled-form">
+
+{% if onboarding_requested %}
+
+<div id="peachpos-inventory-onboarding"
+     class="dashboard-card"
+     style="margin-bottom:24px;">
+
+    <h2>🍑 Coach Peach Setup — Products &amp; Inventory</h2>
+
+    <p>
+        Add the products and inventory items your
+        business needs to track.
+    </p>
+
+    <p style="margin:16px 0; font-weight:700;">
+        Product entry is not required to continue onboarding.
+    </p>
+
+    <p>
+        After saving a product during setup, you can
+        add another or continue to the next step.
+    </p>
+
+    <form method="POST"
+          action="{{ url_for(
+              'complete_pos_inventory_onboarding'
+          ) }}">
+
+        <input type="hidden"
+               name="security_csrf_token"
+               value="{{ security_csrf_token }}">
+
+        <button type="submit" class="btn">
+            Continue with Setup
+        </button>
+
+    </form>
+
+</div>
+
+{% endif %}
+
+
+<form method="POST"
+      class="styled-form"
+      {% if onboarding_requested %}
+      action="{{ url_for('add_inventory_product', onboarding=1) }}"
+      {% endif %}>
 
         <div class="form-grid two-column">
 

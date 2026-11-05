@@ -1,3 +1,9 @@
+{% set peachpos_style = website_settings.website_display_style|default('general') -%}
+{% set website_business_name = (website_settings.website_display_name|default('', true)|trim) or business_name -%}
+{% set peachpos_section_title = 'Food & Drink Menu' if peachpos_style == 'food' else ('Product Catalog' if peachpos_style == 'retail' else 'Products & Offerings') -%}
+{% set peachpos_eyebrow = 'Food & Drink' if peachpos_style == 'food' else ('Catalog' if peachpos_style == 'retail' else 'Products & Offerings') -%}
+{% set peachpos_button = 'View Menu' if peachpos_style == 'food' else ('Browse Catalog' if peachpos_style == 'retail' else 'Explore Offerings') -%}
+{% set peachpos_meta_description = 'Explore our food and drink menu.' if peachpos_style == 'food' else ('Browse our product catalog.' if peachpos_style == 'retail' else 'Explore our products and offerings.') -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,10 +16,10 @@
 
     <meta
         name="description"
-        content="{{ business_name }} — {{ website_settings.website_tagline or 'Professional services and online booking.' }}"
+        content="{{ website_business_name }} — {{ website_settings.website_tagline or (peachpos_meta_description if is_peachpos else 'Professional services and online booking.') }}"
     >
 
-    <title>{{ business_name }}</title>
+    <title>{{ website_business_name }}</title>
 
     <style>
         :root {
@@ -976,7 +982,7 @@
 
             <a href="/" class="brand">
                 <span class="brand-name">
-                    {{ business_name }}
+                    {{ website_business_name }}
                 </span>
 
                 <span class="brand-tagline">
@@ -991,7 +997,17 @@
                     <a href="#about">About</a>
                 {% endif %}
 
-                <a href="#services">Services</a>
+                {% if is_peachpos %}
+    {% if website_settings.show_additional_menu_section and additional_menu_items %}
+        <a href="#additional-menu">
+            {{ 'Catalog' if peachpos_style == 'retail'
+               else ('Offerings' if peachpos_style == 'general'
+               else 'Menu') }}
+        </a>
+    {% endif %}
+{% else %}
+    <a href="#services">Services</a>
+{% endif %}
 
                 <details class="nav-more">
                     <summary>
@@ -999,9 +1015,11 @@
                     </summary>
 
                     <div class="nav-more-menu">
-                        <a href="{{ url_for('tenant_booking_policy') }}">
+                        {% if not is_peachpos %}
+<a href="{{ url_for('tenant_booking_policy') }}">
                             Booking Policy
                         </a>
+{% endif %}
 
                         <a href="{{ url_for('tenant_privacy') }}">
                             Privacy Policy
@@ -1038,7 +1056,7 @@
 
                 <div>
                     <p class="eyebrow">
-                        Welcome to {{ business_name }}
+                        Welcome to {{ website_business_name }}
                     </p>
 
                     <h1>
@@ -1059,12 +1077,13 @@
                             </a>
                         {% endif %}
 
-                        <a
-                            href="#services"
-                            class="button button-secondary"
-                        >
-                            View Services
-                        </a>
+                        {% if is_peachpos %}
+    {% if website_settings.show_additional_menu_section and additional_menu_items %}
+        <a href="#additional-menu" class="button button-secondary">{{ peachpos_button }}</a>
+    {% endif %}
+{% else %}
+    <a href="#services" class="button button-secondary">View Services</a>
+{% endif %}
                     </div>
                 </div>
 
@@ -1176,7 +1195,7 @@
                                     </div>
 
                                     <strong>
-                                        {{ business_name }}
+                                        {{ website_business_name }}
                                     </strong>
 
                                     <span>
@@ -1193,7 +1212,7 @@
                         <div class="about-copy">
 
                             <p class="eyebrow">
-                                About {{ business_name }}
+                                About {{ website_business_name }}
                             </p>
 
                             <h2>
@@ -1214,6 +1233,7 @@
         {% endif %}
 
 
+{% if not is_peachpos %}
         <section
             id="services"
             class="section services-section"
@@ -1277,6 +1297,7 @@
 
             </div>
         </section>
+{% endif %}
 
 
         {% if (
@@ -1284,6 +1305,7 @@
             and services_two
         ) %}
 
+{% if not is_peachpos %}
             <section
                 id="services-two"
                 class="section services-section"
@@ -1347,6 +1369,7 @@
 
                 </div>
             </section>
+{% endif %}
 
         {% endif %}
 
@@ -1356,6 +1379,7 @@
             and services_three
         ) %}
 
+{% if not is_peachpos %}
             <section
                 id="services-three"
                 class="section services-section"
@@ -1419,6 +1443,7 @@
 
                 </div>
             </section>
+{% endif %}
 
         {% endif %}
 
@@ -1440,14 +1465,18 @@
                     <div class="section-heading">
 
                         <p class="eyebrow">
-                            Optional Enhancements
+                            {{ peachpos_eyebrow if is_peachpos else 'Optional Enhancements' }}
                         </p>
 
                         <h2>
                             {{
-                                website_settings
-                                .additional_menu_heading
-                            }}
+    peachpos_section_title
+    if is_peachpos and (
+        website_settings.additional_menu_heading|default('')|trim
+        in ('', 'Additional Menu')
+    )
+    else website_settings.additional_menu_heading
+}}
                         </h2>
 
                         {% if
@@ -1516,6 +1545,7 @@
         {% endif %}
 
 
+{% if not is_peachpos %}
         <section class="cta-section">
             <div class="cta-card">
 
@@ -1538,6 +1568,7 @@
 
             </div>
         </section>
+{% endif %}
 
 
         <section
@@ -1556,11 +1587,15 @@
                         SMS Messaging &amp; Consent
                     </h2>
 
-                    <p>
+                    {% if is_peachpos %}
+<p>{{ business_name }} offers optional text messaging to customers who expressly consent to receive messages.</p>
+{% else %}
+<p>
                         {{ business_name }} offers optional
                         text messaging to clients who expressly
                         choose to participate.
                     </p>
+{% endif %}
 
                 </div>
 
@@ -1573,14 +1608,21 @@
                             How to Opt In
                         </h3>
 
-                        <p>
+                        {% if is_peachpos %}
+<p>Customers may opt in through an express consent process offered by {{ business_name }}. Visiting this website does not enroll anyone in text messaging.</p>
+{% else %}
+<p>
                             Clients may opt in during online
                             booking by selecting the applicable
                             optional, unchecked SMS consent
                             checkbox.
                         </p>
+{% endif %}
 
-                        <p>
+                        {% if is_peachpos %}
+<p>If offered, service messages may include order or pickup updates, business location changes, operating updates, and responses to customer questions.</p>
+{% else %}
+<p>
                             Service messages may include
                             appointment confirmations,
                             reminders, scheduling or
@@ -1589,13 +1631,17 @@
                             updates, and replies to
                             appointment-related questions.
                         </p>
+{% endif %}
 
                         {% if
                             website_settings
                             .include_marketing_sms_in_10dlc_application
                         %}
 
-                            <p>
+                            {% if is_peachpos %}
+<p>If marketing texts are offered, they require separate express consent and may include menu specials, promotions, business updates, and event announcements. Marketing consent is separate from service-message consent.</p>
+{% else %}
+<p>
                                 Marketing messages may include
                                 special offers, service
                                 information, business updates, and
@@ -1605,6 +1651,7 @@
                                 checkbox and is not combined
                                 with service-message consent.
                             </p>
+{% endif %}
 
                         {% endif %}
 
@@ -1632,11 +1679,15 @@
                             reasonable method.
                         </p>
 
-                        <p>
+                        {% if is_peachpos %}
+<p>After opting out, other business communications may be provided by email or telephone when available.</p>
+{% else %}
+<p>
                             After opting out, appointment
                             communications may be provided by
                             email or telephone when available.
                         </p>
+{% endif %}
 
                     </div>
 
@@ -1738,9 +1789,11 @@
                     margin-bottom:14px;
                 "
             >
-                <a href="{{ url_for('tenant_booking_policy') }}">
+                {% if not is_peachpos %}
+<a href="{{ url_for('tenant_booking_policy') }}">
                     Booking &amp; Cancellation Policy
                 </a>
+{% endif %}
 
                 <a href="{{ url_for('tenant_privacy') }}">
                     Privacy Policy
@@ -1761,7 +1814,7 @@
             </p>
 
             <p>
-                Online booking powered by Peach Suite Pro
+                {% if is_peachpos %}PeachWeb powered by Peach Suite Pro{% else %}Online booking powered by Peach Suite Pro{% endif %}
             </p>
 
         </div>

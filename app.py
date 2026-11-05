@@ -203,6 +203,7 @@ from services.provisioning_service import (
     provision_new_business,
     provision_new_business_for_owner_invitation,
 )
+from services.provisioning_service import resolve_peachpos_website_defaults
 
 
 # --------------------------------------------------
@@ -4962,7 +4963,8 @@ def _resolve_public_website_host(hostname):
                 COALESCE(
                     bs.public_booking_enabled,
                     FALSE
-                )
+                ),
+                st.tier_code
 
             FROM public_website_domains pwd
 
@@ -4976,6 +4978,9 @@ def _resolve_public_website_host(hostname):
               ON s.spa_id =
                     pwd.spa_id
 
+            LEFT JOIN subscription_tiers st
+              ON st.subscription_tier_id =
+                    s.subscription_tier_id
             LEFT JOIN booking_settings bs
               ON bs.spa_id =
                     pwd.spa_id
@@ -5011,6 +5016,7 @@ def _resolve_public_website_host(hostname):
 
         return {
             "spa_id": row[0],
+            "tier_code": str(row[7] or "").strip().lower(),
             "business_unit_id": row[1],
             "hostname": row[2],
             "spa_name": spa_name,
@@ -5369,6 +5375,47 @@ def _load_public_website_content(tenant):
                     ),
             })
 
+        cur.execute(
+            '''
+            SELECT website_display_name, website_display_initials
+            FROM public_website_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+            ''',
+            (spa_id, business_unit_id),
+        )
+        name_row = cur.fetchone()
+        website_settings["website_display_name"] = (
+            str(name_row[0] or "").strip()
+            if name_row else ""
+        )
+
+        website_settings["website_display_initials"] = (
+            str(name_row[1] or "").strip()
+            if name_row else ""
+        )
+        if tenant["tier_code"] == "pos":
+            cur.execute(
+                """
+                SELECT website_display_style
+                FROM public_website_settings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                LIMIT 1
+                """,
+                (spa_id, business_unit_id),
+            )
+            style_row = cur.fetchone()
+            selected_style = (
+                style_row[0] if style_row else "general"
+            )
+            website_settings["website_display_style"] = (
+                selected_style
+                if selected_style in ("general", "food", "retail")
+                else "general"
+            )
+
         cur.execute("""
             SELECT
                 snt.service_name,
@@ -5545,20 +5592,45 @@ def _render_public_tenant_home(tenant):
         )
     )
 
+    if tenant["tier_code"] == "pos":
+        content["website_settings"] = (
+            resolve_peachpos_website_defaults(
+                content["website_settings"],
+                content["website_settings"].get(
+                    "website_display_style",
+                    "general",
+                ),
+            )
+        )
+
     return render_template(
         "public_site/tenant_home.html",
 
         business_name=
             tenant["business_name"],
 
-        business_initials=
-            tenant["business_initials"],
+        business_initials=(
+            content["website_settings"].get(
+                "website_display_initials"
+            )
+            or _build_business_initials(
+                content["website_settings"].get(
+                    "website_display_name"
+                )
+                or tenant["business_name"]
+            )
+        ),
 
+        is_peachpos=(
+            tenant["tier_code"] == "pos"
+        ),
         public_booking_slug=
             tenant["public_booking_slug"],
 
-        public_booking_enabled=
-            tenant["public_booking_enabled"],
+        public_booking_enabled=(
+            tenant["public_booking_enabled"]
+            and tenant["tier_code"] != "pos"
+        ),
 
         website_settings=
             content["website_settings"],
@@ -39694,6 +39766,7 @@ def build_navigation_access(role_code):
         # Booking and appointment operations
         "can_manage_booking_imports": False,
         "can_manage_online_booking": False,
+        "can_manage_public_website": False,
 
         # Communications permissions
         "can_send_sms": False,
@@ -39748,6 +39821,7 @@ def build_navigation_access(role_code):
 
             "can_manage_booking_imports": True,
             "can_manage_online_booking": True,
+            "can_manage_public_website": True,
 
             # Communications
             "can_send_sms": True,
@@ -40198,6 +40272,31 @@ BUSINESS_ONBOARDING_SETUP_STEPS = (
 )
 
 
+PEACHPOS_ONBOARDING_SETUP_STEPS = (
+    {
+        "key": "pos_inventory",
+        "title": "Products and Inventory",
+        "endpoint": "add_inventory_product",
+    },
+    {
+        "key": "public_website_settings",
+        "title": "PeachWeb Website Settings",
+        "endpoint": "public_website_settings",
+    },
+    {
+        "key": "website_menu_items",
+        "title": "PeachWeb Menu Items",
+        "endpoint": "public_website_menu_items",
+    },
+    {
+        "key": "website_links",
+        "title": "PeachWeb Business and Social Links",
+        "endpoint": "public_website_links",
+    },
+)
+
+
+
 def _business_onboarding_setup_progress(
     cur,
     *,
@@ -40243,10 +40342,24 @@ def _business_onboarding_setup_progress(
         for row in cur.fetchall()
     }
 
+    subscription_summary = get_business_subscription_summary(
+        cur,
+        spa_id=spa_id,
+    )
+    tier_code = str(
+        subscription_summary.get("tier_code") or ""
+    ).strip().lower()
+
+    step_definitions = (
+        PEACHPOS_ONBOARDING_SETUP_STEPS
+        if tier_code == "pos"
+        else BUSINESS_ONBOARDING_SETUP_STEPS
+    )
+
     steps = []
 
     for position, definition in enumerate(
-        BUSINESS_ONBOARDING_SETUP_STEPS,
+        step_definitions,
         start=1,
     ):
         stored = stored_steps.get(
@@ -40289,6 +40402,12 @@ def _business_onboarding_setup_progress(
     return {
         "business_onboarding_id": onboarding[0],
         "business_unit_id": initial_business_unit_id,
+        "tier_code": tier_code,
+        "coming_soon": (
+            ["Event Calendar"]
+            if tier_code == "pos"
+            else []
+        ),
         "steps": steps,
         "completed_count": completed_count,
         "total_count": len(steps),
@@ -40304,9 +40423,36 @@ def _complete_business_onboarding_step(
     step_key,
     user_id,
 ):
+    # Determine the step list from the onboarding business,
+    # not from user-supplied form data.
+    cur.execute(
+        """
+        SELECT st.tier_code
+        FROM business_onboarding bo
+        JOIN spas s
+          ON s.spa_id = bo.spa_id
+        LEFT JOIN subscription_tiers st
+          ON st.subscription_tier_id = s.subscription_tier_id
+        WHERE bo.business_onboarding_id = %s
+        """,
+        (business_onboarding_id,),
+    )
+
+    tier_row = cur.fetchone()
+    if not tier_row:
+        raise ValueError("Business onboarding record not found.")
+
+    tier_code = str(tier_row[0] or "").strip().lower()
+
+    step_definitions = (
+        PEACHPOS_ONBOARDING_SETUP_STEPS
+        if tier_code == "pos"
+        else BUSINESS_ONBOARDING_SETUP_STEPS
+    )
+
     valid_step_keys = {
         step["key"]
-        for step in BUSINESS_ONBOARDING_SETUP_STEPS
+        for step in step_definitions
     }
 
     if step_key not in valid_step_keys:
@@ -46522,7 +46668,7 @@ def public_website_about_photo():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def public_website_settings():
     spa_id = current_spa_id()
@@ -46530,6 +46676,10 @@ def public_website_settings():
 
     if not business_unit_id:
         abort(403)
+
+    is_peachpos = (
+        current_subscription_tier_code() == "pos"
+    )
 
     onboarding_requested = (
         request.args.get("onboarding") == "1"
@@ -46552,6 +46702,9 @@ def public_website_settings():
                 request.form.get("action")
                 or "save"
             ).strip().lower()
+
+            if is_peachpos and action == "reset":
+                abort(403)
 
             if action == "reset":
                 defaults = (
@@ -46920,6 +47073,51 @@ def public_website_settings():
                     ).strip(),
                 }
 
+                if is_peachpos:
+                    # Preserve fields excluded from PeachPOS.
+                    # Ignore client-submitted values for them.
+                    protected_fields = (
+                        "services_heading",
+                        "services_description",
+                        "show_services_two_section",
+                        "services_two_heading",
+                        "services_two_description",
+                        "show_services_three_section",
+                        "services_three_heading",
+                        "services_three_description",
+                        "booking_heading",
+                        "booking_description",
+                        "appointment_contact_email",
+                        "appointment_contact_phone",
+                    )
+
+                    cur.execute(
+                        "SELECT "
+                        + ", ".join(protected_fields)
+                        + " FROM public_website_settings "
+                          "WHERE spa_id = %s "
+                          "AND business_unit_id = %s "
+                          "LIMIT 1",
+                        (spa_id, business_unit_id),
+                    )
+                    existing_row = cur.fetchone()
+
+                    if existing_row is None:
+                        preserved = {
+                            field: PUBLIC_WEBSITE_DEFAULTS.get(
+                                field,
+                                False if field.startswith("show_")
+                                else "",
+                            )
+                            for field in protected_fields
+                        }
+                    else:
+                        preserved = dict(
+                            zip(protected_fields, existing_row)
+                        )
+
+                    settings.update(preserved)
+
                 allowed_color_schemes = {
                     "peach_cream",
                     "coastal_blue",
@@ -46994,6 +47192,15 @@ def public_website_settings():
                     ),
                 }
 
+                if is_peachpos:
+                    for field in (
+                        "services_heading",
+                        "services_description",
+                        "booking_heading",
+                        "booking_description",
+                    ):
+                        field_rules.pop(field, None)
+
                 for field_name, rule in field_rules.items():
                     field_label = rule[0]
                     maximum_length = rule[1]
@@ -47047,6 +47254,9 @@ def public_website_settings():
                         "Services Three",
                     ),
                 )
+
+                if is_peachpos:
+                    service_section_rules = ()
 
                 for (
                     show_field,
@@ -47354,6 +47564,57 @@ def public_website_settings():
 
 
 
+            submitted_initials = (
+                request.form.get("website_display_initials")
+                or ""
+            ).strip().upper()
+
+            if submitted_initials and (
+                len(submitted_initials) > 4
+                or not all(
+                    ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+                    for ch in submitted_initials
+                )
+            ):
+                abort(
+                    400,
+                    description="Business Initials must be 1-4 letters or numbers."
+                )
+
+            submitted_name = (
+                request.form.get("website_display_name") or ""
+            ).strip()
+
+            if len(submitted_name) > 180:
+                abort(400, description="Business Name is too long.")
+
+            cur.execute(
+                '''
+                SELECT COALESCE(
+                    NULLIF(BTRIM(bu.unit_name), ''),
+                    NULLIF(BTRIM(s.spa_name), ''),
+                    'Business'
+                )
+                FROM business_units bu
+                JOIN spas s ON s.spa_id = bu.spa_id
+                WHERE bu.spa_id = %s
+                  AND bu.business_unit_id = %s
+                LIMIT 1
+                ''',
+                (spa_id, business_unit_id),
+            )
+            registered_name_row = cur.fetchone()
+            if registered_name_row is None:
+                abort(403)
+
+            # Keep the automatic fallback unless a different
+            # public website name was actually selected.
+            stored_website_name = (
+                submitted_name
+                if submitted_name
+                and submitted_name != registered_name_row[0]
+                else None
+            )
             cur.execute("""
                 INSERT INTO public_website_settings (
                     spa_id,
@@ -47521,6 +47782,48 @@ def public_website_settings():
                 ],
             ))
 
+            if is_peachpos:
+                selected_style = (
+                    request.form.get("website_display_style")
+                    or "general"
+                ).strip().lower()
+
+                if selected_style not in (
+                    "general", "food", "retail"
+                ):
+                    abort(400)
+
+                cur.execute(
+                    """
+                    UPDATE public_website_settings
+                    SET website_display_style = %s
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                    """,
+                    (
+                        selected_style,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+                if cur.rowcount != 1:
+                    raise RuntimeError(
+                        "Website display style was not saved"
+                    )
+
+            cur.execute(
+                '''
+                UPDATE public_website_settings
+                SET website_display_name = %s,
+                    website_display_initials = %s
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                ''',
+                (stored_website_name, submitted_initials or None, spa_id, business_unit_id),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("Website Business Name was not saved")
             conn.commit()
 
             flash(
@@ -47630,6 +47933,68 @@ def public_website_settings():
                 PUBLIC_WEBSITE_DEFAULTS.copy()
             )
 
+        if is_peachpos:
+            cur.execute(
+                """
+                SELECT website_display_style
+                FROM public_website_settings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                """,
+                (spa_id, business_unit_id),
+            )
+            style_row = cur.fetchone()
+            settings["website_display_style"] = (
+                style_row[0] if style_row else "general"
+            )
+
+        cur.execute(
+            '''
+            SELECT
+                COALESCE(
+                    NULLIF(BTRIM(bu.unit_name), ''),
+                    NULLIF(BTRIM(s.spa_name), ''),
+                    'Business'
+                ),
+                pws.website_display_name,
+                pws.website_display_initials
+            FROM business_units bu
+            JOIN spas s ON s.spa_id = bu.spa_id
+            LEFT JOIN public_website_settings pws
+              ON pws.spa_id = bu.spa_id
+             AND pws.business_unit_id = bu.business_unit_id
+            WHERE bu.spa_id = %s
+              AND bu.business_unit_id = %s
+            LIMIT 1
+            ''',
+            (spa_id, business_unit_id),
+        )
+        website_name_row = cur.fetchone()
+        if website_name_row is None:
+            abort(403)
+
+        settings["website_display_name"] = (
+            str(website_name_row[1] or "").strip()
+            or website_name_row[0]
+        )
+        settings["website_display_initials"] = (
+            str(website_name_row[2] or "").strip()
+        )
+        settings["website_auto_initials"] = (
+            _build_business_initials(
+                settings["website_display_name"]
+            )
+        )
+
+        if is_peachpos:
+            settings = resolve_peachpos_website_defaults(
+                settings,
+                settings.get(
+                    "website_display_style",
+                    "general",
+                ),
+            )
+
     finally:
         cur.close()
         conn.close()
@@ -47671,7 +48036,7 @@ def public_website_settings():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def complete_public_website_settings_onboarding():
     spa_id = current_spa_id()
@@ -47733,6 +48098,14 @@ def complete_public_website_settings_onboarding():
         "success",
     )
 
+    if current_subscription_tier_code() == "pos":
+        return redirect(
+            url_for(
+                "public_website_menu_items",
+                onboarding=1,
+            )
+        )
+
     return redirect(
         url_for(
             "booking_control_center",
@@ -47747,11 +48120,83 @@ def complete_public_website_settings_onboarding():
 #
 ############################################
 
+@app.route(
+    "/public-website-menu-items/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission('can_manage_public_website')
+def complete_website_menu_items_onboarding():
+    if current_subscription_tier_code() != "pos":
+        abort(403)
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(token):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            abort(403)
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="website_menu_items",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "PeachWeb Menu Items setup reviewed. "
+        "You can add or update menu items anytime.",
+        "success",
+    )
+
+    return redirect(
+        url_for("public_website_links", onboarding=1)
+    )
+
+
 @app.route("/public-website-menu-items")
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def public_website_menu_items():
     spa_id = current_spa_id()
@@ -47759,6 +48204,11 @@ def public_website_menu_items():
 
     if not business_unit_id:
         abort(403)
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+    )
+
 
     status_filter = (
         request.args.get("status")
@@ -47856,13 +48306,50 @@ def public_website_menu_items():
         else ""
     )
 
+    is_peachpos = (
+        current_subscription_tier_code() == "pos"
+    )
+    website_display_style = "general"
+
+    if is_peachpos:
+        style_conn = get_db_connection()
+        style_cur = style_conn.cursor()
+        try:
+            style_cur.execute(
+                """
+                SELECT website_display_style
+                FROM public_website_settings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                LIMIT 1
+                """,
+                (spa_id, business_unit_id),
+            )
+            style_row = style_cur.fetchone()
+            if (
+                style_row
+                and style_row[0] in ("general", "food", "retail")
+            ):
+                website_display_style = style_row[0]
+        finally:
+            style_cur.close()
+            style_conn.close()
+
     return render_template(
         "public_website_menu_items.html",
+        is_peachpos=is_peachpos,
+        website_display_style=website_display_style,
         menu_items=menu_items,
         status_filter=status_filter,
         active_count=active_count,
         hidden_count=hidden_count,
-        public_menu_url=public_menu_url
+        public_menu_url=public_menu_url,
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        )
     )
 
 
@@ -47873,7 +48360,7 @@ def public_website_menu_items():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def add_public_website_menu_item():
     from decimal import Decimal, InvalidOperation
@@ -48081,7 +48568,7 @@ def add_public_website_menu_item():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def edit_public_website_menu_item(
     menu_item_id
@@ -48332,7 +48819,7 @@ def edit_public_website_menu_item(
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def toggle_public_website_menu_item(
     menu_item_id
@@ -48423,7 +48910,7 @@ def toggle_public_website_menu_item(
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def public_website_links():
     spa_id = current_spa_id()
@@ -48553,7 +49040,7 @@ def public_website_links():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def complete_website_links_onboarding():
     spa_id = current_spa_id()
@@ -48609,6 +49096,19 @@ def complete_website_links_onboarding():
         cur.close()
         conn.close()
 
+    if current_subscription_tier_code() == "pos":
+        flash(
+            "PeachPOS setup complete. "
+            "Your workspace is ready to use.",
+            "success",
+        )
+        return redirect(
+            url_for(
+                "morning_briefing",
+                setup_complete=1,
+            )
+        )
+
     flash(
         "Peach Suite Pro setup complete. "
         "Your workspace is ready to use.",
@@ -48630,7 +49130,7 @@ def complete_website_links_onboarding():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def add_public_website_link():
     spa_id = current_spa_id()
@@ -48842,7 +49342,7 @@ def add_public_website_link():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def edit_public_website_link(
     public_website_link_id
@@ -49093,7 +49593,7 @@ def edit_public_website_link(
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def toggle_public_website_link(
     public_website_link_id
@@ -89323,6 +89823,78 @@ def inventory_home():
 #   --------------------------------------
 
 
+@app.route(
+    "/inventory/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission("can_view_inventory")
+def complete_pos_inventory_onboarding():
+    if current_subscription_tier_code() != "pos":
+        abort(403)
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(token):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            abort(403)
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="pos_inventory",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Products and Inventory setup reviewed. "
+        "You can add more products anytime.",
+        "success",
+    )
+
+    return redirect(
+        url_for("public_website_settings", onboarding=1)
+    )
+
+
 @app.route("/inventory/add", methods=["GET", "POST"])
 @login_required
 @spa_required
@@ -89331,11 +89903,26 @@ def add_inventory_product():
     business_unit_id = current_business_unit_id()
     prefill_sku = request.args.get("sku", "").strip()
 
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        and current_subscription_tier_code() == "pos"
+    )
+
     if not business_unit_id:
         abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+    if onboarding_requested and request.method == "GET":
+        onboarding_requested = bool(
+            _business_onboarding_setup_progress(
+                cur,
+                spa_id=spa_id,
+                user_id=session.get("user_id"),
+                business_unit_id=business_unit_id,
+            )
+        )
 
     if request.method == "POST":
 
@@ -89465,14 +90052,24 @@ def add_inventory_product():
                 "success",
             )
 
-            return redirect(url_for("inventory_home"))
+            return redirect(
+                    url_for("add_inventory_product", onboarding=1)
+                    if onboarding_requested
+                    else url_for("inventory_home")
+                )
 
     cur.close()
     conn.close()
 
     return render_template(
         "add_inventory_product.html",
-        prefill_sku=prefill_sku
+        prefill_sku=prefill_sku,
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        ),
     )
 
 
@@ -116920,6 +117517,9 @@ def dashboard():
     if session.get("role") == "master_admin":
        return redirect(url_for("feedback_admin"))
 
+    if current_subscription_tier_code() == "pos":
+        return redirect(url_for("morning_briefing"))
+
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     conn = get_db_connection()
@@ -132908,6 +133508,23 @@ def _render_public_booking_page(
             WHERE bs.public_booking_slug = %s
               AND bu.is_active = TRUE
               AND s.active = TRUE
+
+              AND EXISTS (
+                  SELECT 1
+                  FROM subscription_tiers st
+                  JOIN subscription_tier_features stf
+                    ON stf.subscription_tier_id =
+                       st.subscription_tier_id
+                  JOIN subscription_features sf
+                    ON sf.subscription_feature_id =
+                       stf.subscription_feature_id
+                  WHERE st.subscription_tier_id =
+                        s.subscription_tier_id
+                    AND st.is_active = TRUE
+                    AND st.tier_code <> 'pos'
+                    AND sf.feature_key = 'appointments'
+                    AND sf.is_active = TRUE
+              )
 
             LIMIT 1
         """, (public_booking_slug,))

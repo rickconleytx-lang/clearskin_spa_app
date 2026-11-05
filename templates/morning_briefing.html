@@ -799,6 +799,94 @@
 {% endif %}
 
 
+{% if setup_progress and setup_progress.tier_code == "pos" %}
+
+<style id="peachpos-optional-typography">
+#peachpos-optional-setup .dashboard-card > h2 {
+    font-size: 24px !important;
+    line-height: 1.3;
+    text-align: center;
+}
+
+#peachpos-optional-setup .dashboard-card > p {
+    font-size: 16px !important;
+    font-weight: 400 !important;
+    line-height: 1.5;
+    text-align: center;
+}
+
+#peachpos-optional-setup .dashboard-card ul {
+    max-width: 800px;
+    margin: 18px auto 0;
+    padding-left: 24px;
+    text-align: left;
+}
+
+#peachpos-optional-setup .dashboard-card li {
+    margin-bottom: 18px !important;
+    font-size: 16px !important;
+    font-weight: 400 !important;
+    text-align: left;
+}
+
+#peachpos-optional-setup .dashboard-card li strong {
+    font-size: 17px !important;
+    font-weight: 600;
+}
+
+#peachpos-optional-setup .dashboard-card li p {
+    margin: 5px 0 0;
+    font-size: 16px !important;
+    font-weight: 400 !important;
+    line-height: 1.5;
+    text-align: left;
+}
+
+</style>
+
+<section id="peachpos-optional-setup"
+         style="scroll-margin-top:20px;">
+
+    <div class="dashboard-card">
+
+        <h2>🍑 Additional PeachPOS Setup</h2>
+
+        <p>
+            These features are optional and do not affect
+            completion of your required setup steps.
+        </p>
+
+        <ul>
+            <li style="margin-bottom:12px;">
+                <strong>Employee Setup — Optional</strong>
+                <p>
+                    Operating your business yourself?
+                    You can add employees later from
+                    the Employees menu whenever needed.
+                </p>
+            </li>
+
+            {% for feature in setup_progress.coming_soon %}
+            <li style="margin-bottom:12px;">
+                <strong>{{ feature }} — Coming Soon</strong>
+                <p>
+                    This feature is being developed.
+                    You can complete PeachPOS onboarding
+                    without it.
+                </p>
+            </li>
+            {% endfor %}
+        </ul>
+
+    </div>
+
+</section>
+
+<br><br>
+
+{% endif %}
+
+
 <section id="coach-recommendations"
          style="scroll-margin-top:20px;">
 
