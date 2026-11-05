@@ -40774,11 +40774,30 @@ def current_subscription_terms_version():
 
 
 _STRIPE_SIGNUP_SESSION_KEY = "_stripe_checkout_signup"
+
+_STRIPE_SIGNUP_SESSION_KEYS = {
+    "solo": _STRIPE_SIGNUP_SESSION_KEY,
+    "pos": "_stripe_checkout_signup_pos",
+}
 _STRIPE_SIGNUP_CSRF_PURPOSE = "stripe_checkout_signup"
+
+
+def _stripe_signup_session_key(tier_code):
+    tier = str(tier_code or "").strip().lower()
+    key = _STRIPE_SIGNUP_SESSION_KEYS.get(tier)
+
+    if not key:
+        raise ValueError(
+            "Unsupported Stripe signup subscription tier."
+        )
+
+    return key
 
 
 def _set_stripe_signup_session(
     stripe_checkout_signup_id,
+    *,
+    tier_code="solo",
 ):
     try:
         signup_id = int(
@@ -40796,14 +40815,15 @@ def _set_stripe_signup_session(
 
     # Keep public signup PII out of the signed browser session.
     # Only the server-side database identifier is retained.
-    session[_STRIPE_SIGNUP_SESSION_KEY] = {
+    session[_stripe_signup_session_key(tier_code)] = {
         "stripe_checkout_signup_id": signup_id,
     }
 
 
-def _stripe_signup_session_id():
+def _stripe_signup_session_id(*, tier_code="solo"):
+    session_key = _stripe_signup_session_key(tier_code)
     state = session.get(
-        _STRIPE_SIGNUP_SESSION_KEY
+        session_key
     )
 
     if not isinstance(state, dict):
@@ -40817,14 +40837,14 @@ def _stripe_signup_session_id():
         )
     except (TypeError, ValueError):
         session.pop(
-            _STRIPE_SIGNUP_SESSION_KEY,
+            session_key,
             None,
         )
         return None
 
     if signup_id <= 0:
         session.pop(
-            _STRIPE_SIGNUP_SESSION_KEY,
+            session_key,
             None,
         )
         return None
@@ -40832,9 +40852,9 @@ def _stripe_signup_session_id():
     return signup_id
 
 
-def _clear_stripe_signup_session():
+def _clear_stripe_signup_session(*, tier_code="solo"):
     session.pop(
-        _STRIPE_SIGNUP_SESSION_KEY,
+        _stripe_signup_session_key(tier_code),
         None,
     )
 
@@ -40865,7 +40885,11 @@ def _render_stripe_signup(
     form_values=None,
     error_message=None,
     success_message=None,
+    tier_code="solo",
 ):
+    if tier_code not in {"solo", "pos"}:
+        abort(404)
+
     form_values = dict(
         form_values or {}
     )
@@ -40882,7 +40906,11 @@ def _render_stripe_signup(
         )
 
     return render_template(
-        "signup/solo_signup.html",
+        (
+            "signup/pos_signup.html"
+            if tier_code == "pos"
+            else "signup/solo_signup.html"
+        ),
         signup_stage=signup_stage,
         signup_record=signup_record,
         form_values=form_values,
@@ -40898,8 +40926,10 @@ def _render_stripe_signup(
     )
 
 
-def _load_current_stripe_signup():
-    signup_id = _stripe_signup_session_id()
+def _load_current_stripe_signup(*, tier_code="solo"):
+    signup_id = _stripe_signup_session_id(
+        tier_code=tier_code
+    )
 
     if signup_id is None:
         return None
@@ -40917,20 +40947,30 @@ def _load_current_stripe_signup():
         cur.close()
         conn.close()
 
-    if not signup_record:
-        _clear_stripe_signup_session()
+    if (
+        not signup_record
+        or str(signup_record.get("tier_code") or "").strip().lower()
+        != str(tier_code or "").strip().lower()
+    ):
+        _clear_stripe_signup_session(
+            tier_code=tier_code
+        )
         return None
 
     return signup_record
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>",
+    methods=["GET", "POST"],
+)
+@app.route(
     "/signup/solo",
     methods=["GET", "POST"],
 )
-def stripe_signup():
+def stripe_signup(tier_code="solo"):
     existing_signup = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if request.method == "GET":
@@ -40942,21 +40982,24 @@ def stripe_signup():
                     "checkout_created",
                 }
             ):
-                _clear_stripe_signup_session()
+                _clear_stripe_signup_session(tier_code=tier_code)
 
             elif existing_signup["phone_verified_at"]:
                 return _render_stripe_signup(
+                    tier_code=tier_code,
                     signup_stage="phone_verified",
                     signup_record=existing_signup,
                 )
 
             else:
                 return _render_stripe_signup(
+                    tier_code=tier_code,
                     signup_stage="verify_phone",
                     signup_record=existing_signup,
                 )
 
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="signup",
             form_values={
                 "billing_interval": "month",
@@ -40982,7 +41025,7 @@ def stripe_signup():
         and existing_signup["signup_status"] == "pending"
     ):
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     form_values = {
@@ -41120,7 +41163,7 @@ def stripe_signup():
                 ),
                 terms_version=terms_version,
                 terms_accepted=terms_accepted,
-                tier_code="solo",
+                tier_code=tier_code,
             )
 
             conn.commit()
@@ -41138,13 +41181,15 @@ def stripe_signup():
         StripeServiceError,
     ) as exc:
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="signup",
             form_values=form_values,
             error_message=str(exc),
         ), 400
 
     _set_stripe_signup_session(
-        signup["stripe_checkout_signup_id"]
+        signup["stripe_checkout_signup_id"],
+        tier_code=tier_code,
     )
 
     delivery = (
@@ -41158,11 +41203,12 @@ def stripe_signup():
     )
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if delivery["status"] == "sent":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             success_message=(
@@ -41177,6 +41223,7 @@ def stripe_signup():
         "locked",
     }:
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41186,6 +41233,7 @@ def stripe_signup():
         ), 429
 
     return _render_stripe_signup(
+        tier_code=tier_code,
         signup_stage="verify_phone",
         signup_record=signup_record,
         error_message=(
@@ -41196,10 +41244,14 @@ def stripe_signup():
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>/send-phone-code",
+    methods=["POST"],
+)
+@app.route(
     "/signup/solo/send-phone-code",
     methods=["POST"],
 )
-def stripe_signup_send_phone_code():
+def stripe_signup_send_phone_code(tier_code="solo"):
     submitted_token = request.form.get(
         "csrf_token",
         "",
@@ -41212,24 +41264,24 @@ def stripe_signup_send_phone_code():
         abort(400)
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if not signup_record:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["signup_status"] != "pending":
-        _clear_stripe_signup_session()
+        _clear_stripe_signup_session(tier_code=tier_code)
 
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["phone_verified_at"]:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     delivery = (
@@ -41243,11 +41295,12 @@ def stripe_signup_send_phone_code():
     )
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if delivery["status"] == "sent":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             success_message=(
@@ -41265,6 +41318,7 @@ def stripe_signup_send_phone_code():
         )
 
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41276,6 +41330,7 @@ def stripe_signup_send_phone_code():
 
     if delivery["status"] == "hourly_limit":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41286,6 +41341,7 @@ def stripe_signup_send_phone_code():
 
     if delivery["status"] == "locked":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41296,10 +41352,11 @@ def stripe_signup_send_phone_code():
 
     if delivery["status"] == "already_verified":
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     return _render_stripe_signup(
+        tier_code=tier_code,
         signup_stage="verify_phone",
         signup_record=signup_record,
         error_message=(
@@ -41310,10 +41367,14 @@ def stripe_signup_send_phone_code():
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>/verify-phone",
+    methods=["POST"],
+)
+@app.route(
     "/signup/solo/verify-phone",
     methods=["POST"],
 )
-def stripe_signup_verify_phone():
+def stripe_signup_verify_phone(tier_code="solo"):
     submitted_token = request.form.get(
         "csrf_token",
         "",
@@ -41326,24 +41387,24 @@ def stripe_signup_verify_phone():
         abort(400)
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if not signup_record:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["signup_status"] != "pending":
-        _clear_stripe_signup_session()
+        _clear_stripe_signup_session(tier_code=tier_code)
 
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["phone_verified_at"]:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     verification_code = str(
@@ -41382,12 +41443,12 @@ def stripe_signup_verify_phone():
         conn.close()
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if verification["verified"]:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     reason = verification.get(
@@ -41404,6 +41465,7 @@ def stripe_signup_verify_phone():
         )
 
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41421,6 +41483,7 @@ def stripe_signup_verify_phone():
 
     if reason == "locked":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41432,6 +41495,7 @@ def stripe_signup_verify_phone():
 
     if reason == "challenge_unavailable":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41441,6 +41505,7 @@ def stripe_signup_verify_phone():
         ), 400
 
     return _render_stripe_signup(
+        tier_code=tier_code,
         signup_stage="verify_phone",
         signup_record=signup_record,
         error_message=(
@@ -41452,10 +41517,14 @@ def stripe_signup_verify_phone():
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>/checkout",
+    methods=["POST"],
+)
+@app.route(
     "/signup/solo/checkout",
     methods=["POST"],
 )
-def stripe_signup_checkout():
+def stripe_signup_checkout(tier_code="solo"):
     submitted_token = request.form.get(
         "csrf_token",
         "",
@@ -41468,37 +41537,37 @@ def stripe_signup_checkout():
         abort(400)
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if not signup_record:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["signup_status"] not in {
         "pending",
         "checkout_created",
     }:
-        _clear_stripe_signup_session()
+        _clear_stripe_signup_session(tier_code=tier_code)
 
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if not signup_record["phone_verified_at"]:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     base_url = _password_reset_base_url()
 
     success_url = (
-        f"{base_url}/signup/solo/success"
+        f"{base_url}/signup/{tier_code}/success"
     )
 
     cancel_url = (
-        f"{base_url}/signup/solo"
+        f"{base_url}/signup/{tier_code}"
     )
 
     conn = get_db_connection()
@@ -41523,6 +41592,7 @@ def stripe_signup_checkout():
         conn.rollback()
 
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="phone_verified",
             signup_record=signup_record,
             error_message=(
@@ -41546,6 +41616,7 @@ def stripe_signup_checkout():
 
     if not checkout_url:
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="phone_verified",
             signup_record=signup_record,
             error_message=(
@@ -41892,12 +41963,16 @@ def stripe_webhook():
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>/success",
+    methods=["GET"],
+)
+@app.route(
     "/signup/solo/success",
     methods=["GET"],
 )
-def stripe_signup_success():
+def stripe_signup_success(tier_code="solo"):
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     # Stripe Checkout has returned control to PSP. Keep the
@@ -41907,9 +41982,10 @@ def stripe_signup_success():
     #
     # Backend duplicate protection remains authoritative and will
     # reject another active signup for the same owner email.
-    _clear_stripe_signup_session()
+    _clear_stripe_signup_session(tier_code=tier_code)
 
     return _render_stripe_signup(
+        tier_code=tier_code,
         signup_stage="checkout_returned",
         signup_record=signup_record,
     )
