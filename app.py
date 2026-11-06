@@ -39914,6 +39914,28 @@ def current_workspace_access():
 
 
 
+def require_peachbook_subscription_access(view_function):
+    """
+    Restrict PeachBook operations to subscriptions with
+    appointments, explicitly excluding PeachPOS.
+    """
+    from functools import wraps
+
+    @wraps(view_function)
+    def wrapped_view(*args, **kwargs):
+        if not is_master_admin():
+            if (
+                current_subscription_tier_code() == "pos"
+                or not has_subscription_feature("appointments")
+            ):
+                abort(403)
+
+        return view_function(*args, **kwargs)
+
+    return wrapped_view
+
+
+
 def require_workspace_permission(permission_name):
     from functools import wraps
 
@@ -75328,6 +75350,7 @@ def clients_home():
 @app.route("/godaddy-imports/review-calendar")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def review_godaddy_imports_and_calendar():
     spa_id = current_spa_id()
 
@@ -82646,6 +82669,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
 @app.route("/godaddy-imports/<int:appointment_id>/raw")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_manage_booking_imports")
 def godaddy_import_raw(appointment_id):
     spa_id = current_spa_id()
@@ -82876,6 +82900,7 @@ def debug_db():
 @app.route("/test-godaddy-create-appointment")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def test_godaddy_create_appointment():
     spa_id = current_spa_id()
 
@@ -82903,6 +82928,7 @@ def test_godaddy_create_appointment():
 @app.route("/godaddy-imports/reviewed/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_manage_booking_imports")
 def mark_godaddy_import_reviewed(appointment_id):
     spa_id = current_spa_id()
@@ -87398,6 +87424,7 @@ def reminder_queue():
 @app.route("/reminder_queue/generate-appointments", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_manage_communication_automation")
 
 def generate_appointment_reminders():
@@ -87983,6 +88010,7 @@ def send_one_reminder(reminder_id):
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_send_sms")
 
 def prepare_appointment_reminder(appointment_id):
@@ -88125,6 +88153,7 @@ def prepare_appointment_reminder(appointment_id):
 @app.route("/reminder_queue/generate-after-appointments", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_manage_communication_automation")
 
 def generate_after_appointment_followups():
@@ -93568,6 +93597,7 @@ def client_information_labels():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def schedule_appointment_start():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -109859,6 +109889,7 @@ def _complete_service_recipient_resolution_after_client_create(
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def resolve_service_recipient(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = (
@@ -115854,6 +115885,7 @@ def calendar_view():
 @app.route("/quick_reschedule_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def quick_reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -116104,6 +116136,7 @@ def quick_reschedule_appointment(appointment_id):
 @app.route("/appointment-details/<int:appointment_id>")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def appointment_details(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -116304,6 +116337,7 @@ def appointment_details(appointment_id):
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def save_appointment_todays_contact(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -121909,6 +121943,7 @@ from datetime import date
 @app.route("/appointments")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def appointments():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -122075,6 +122110,7 @@ def appointments():
 @app.route("/add_appointment", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def add_appointment():
     user_id = session.get("user_id")
     spa_id = current_spa_id()
@@ -122506,6 +122542,7 @@ def add_appointment():
 @app.route("/edit_appointment/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def edit_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -122751,6 +122788,7 @@ def edit_appointment(appointment_id):
 @app.route("/delete_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def delete_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -122858,6 +122896,7 @@ def delete_appointment(appointment_id):
 @app.route("/cancel_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def cancel_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -123004,6 +123043,7 @@ def cancel_appointment(appointment_id):
 @app.route("/reschedule_appointment/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -123276,6 +123316,7 @@ def reschedule_appointment(appointment_id):
 @app.route("/complete_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def complete_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -123411,6 +123452,7 @@ def complete_appointment(appointment_id):
 @app.route("/post_appointment_wrap_up/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def post_appointment_wrap_up(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -123837,6 +123879,7 @@ def post_appointment_wrap_up(appointment_id):
 @app.route("/post_appointment_wrap_up_saved/<int:appointment_id>")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def post_appointment_wrap_up_saved(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -123906,6 +123949,7 @@ def post_appointment_wrap_up_saved(appointment_id):
 @app.route("/appointment_history/<int:appointment_id>")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def appointment_history(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -125980,6 +126024,7 @@ def delete_client(client_id):
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -126350,6 +126395,7 @@ def booking_business_hours():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -126466,6 +126512,7 @@ def complete_business_hours_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -127100,6 +127147,7 @@ def booking_provider_hours():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -127220,6 +127268,7 @@ def complete_provider_hours_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -127995,6 +128044,7 @@ def booking_provider_services():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -128119,6 +128169,7 @@ def complete_provider_services_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -129164,6 +129215,7 @@ def booking_provider_time_off():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -129249,6 +129301,7 @@ def complete_provider_time_off_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -131405,6 +131458,7 @@ def _booking_validate_selected_slot(
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -136618,6 +136672,23 @@ def public_booking_confirm(
               AND bs.public_booking_enabled = TRUE
               AND bu.is_active = TRUE
               AND s.active = TRUE
+
+              AND EXISTS (
+                  SELECT 1
+                  FROM subscription_tiers st
+                  JOIN subscription_tier_features stf
+                    ON stf.subscription_tier_id =
+                       st.subscription_tier_id
+                  JOIN subscription_features sf
+                    ON sf.subscription_feature_id =
+                       stf.subscription_feature_id
+                  WHERE st.subscription_tier_id =
+                        s.subscription_tier_id
+                    AND st.is_active = TRUE
+                    AND st.tier_code <> 'pos'
+                    AND sf.feature_key = 'appointments'
+                    AND sf.is_active = TRUE
+              )
             LIMIT 1
         """, (public_booking_slug,))
 
@@ -137192,6 +137263,7 @@ def public_booking_confirm(
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -137818,6 +137890,7 @@ def booking_control_center():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -137895,6 +137968,7 @@ def complete_booking_control_center_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -138126,6 +138200,7 @@ def save_booking_notification_settings():
 @app.route("/booking/public-preview")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -138184,6 +138259,7 @@ def booking_public_preview():
 @app.route("/booking/availability-test")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
