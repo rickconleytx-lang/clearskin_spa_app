@@ -682,6 +682,11 @@ def inject_navigation_access_context():
             payroll_navigation_available
         ),
 
+        "navigation_subscription_tier_code": (
+            current_subscription_tier_code()
+            if role_code is not None
+            else None
+        ),
         "subscription_entitlements": (
             subscription_entitlements
         ),
