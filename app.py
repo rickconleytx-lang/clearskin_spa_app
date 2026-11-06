@@ -44642,6 +44642,23 @@ def system_activity():
 
     logs = cur.fetchall()
 
+    # System Activity timestamps are stored in UTC.
+    # Display them in Central Time for Master Admin.
+    from datetime import timezone as _activity_utc
+    from zoneinfo import ZoneInfo as _ActivityZoneInfo
+
+    _activity_zone = _ActivityZoneInfo("America/Chicago")
+
+    for log in logs:
+        _activity_time = log["created_at"]
+        if _activity_time.tzinfo is None:
+            _activity_time = _activity_time.replace(
+                tzinfo=_activity_utc.utc
+            )
+        log["created_at_central"] = (
+            _activity_time.astimezone(_activity_zone)
+        )
+
     from services.security_login_email_crypto import (
         LoginEmailCryptoError,
         decrypt_attempted_email,

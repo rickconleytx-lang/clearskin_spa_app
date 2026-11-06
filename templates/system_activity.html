@@ -241,8 +241,8 @@
 
 
 
-        {% set current_date = log.created_at.strftime("%b %-d") %}
-        {% set previous_date = logs[loop.index0 - 1].created_at.strftime("%b %-d") if not loop.first else "" %}
+        {% set current_date = log.created_at_central.strftime("%b %-d") %}
+        {% set previous_date = logs[loop.index0 - 1].created_at_central.strftime("%b %-d") if not loop.first else "" %}
 
         <div style="display:flex; gap:14px; padding:12px 0; border-bottom:1px solid #eee;">
 
@@ -260,7 +260,7 @@
                 </div>
 
                 <div style="font-size:14px; font-weight:600; color:#333;">
-                    {{ log.created_at.strftime("%-I:%M %p") }}
+                    {{ log.created_at_central.strftime("%-I:%M %p %Z") }}
                 </div>
             </div>
 
