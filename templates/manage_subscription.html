@@ -63,16 +63,15 @@
 
     {% if subscription_summary.amount_display %}
         <p>
-            After the trial,
-            <strong>
-                {{ subscription_summary.amount_display }}
-                {% if subscription_summary.billing_interval == "month" %}
-                    per month
-                {% elif subscription_summary.billing_interval == "year" %}
-                    per year
-                {% endif %}
-            </strong>
-            will begin unless the subscription is canceled.
+            After your free trial,
+            {% if subscription_summary.billing_interval == "month" %}
+                monthly subscription charges
+            {% elif subscription_summary.billing_interval == "year" %}
+                annual subscription charges
+            {% else %}
+                subscription charges
+            {% endif %}
+            will begin unless you cancel your subscription before the trial ends.
         </p>
     {% endif %}
 

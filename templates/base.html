@@ -5645,7 +5645,11 @@ document.addEventListener(
                 document.documentElement.style.visibility = "hidden";
             }
 
-            sendTabPresenceClose();
+            // pagehide also fires during ordinary navigation,
+            // including Safari Back and Forward.
+            // Do not treat navigation as a closed browser tab.
+            // The server still enforces authenticated session
+            // expiration and browser-session identity checks.
         }
     );
 
