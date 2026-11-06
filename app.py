@@ -44622,14 +44622,82 @@ def system_activity():
             category,
             severity,
             message,
-            created_at
+            spa_id,
+            related_type,
+            related_id,
+            system_logs.created_at,
+            details.failure_reason AS login_failure_reason,
+            details.login_channel,
+            details.attempted_email_masked,
+            details.attempted_email_ciphertext,
+            details.browser_family AS login_browser_family,
+            details.platform_family AS login_platform_family
         FROM system_logs
+        LEFT JOIN security_login_attempt_details AS details
+          ON details.system_log_id = system_logs.log_id
         {where_sql}
-        ORDER BY created_at DESC
+        ORDER BY system_logs.created_at DESC
         LIMIT %s OFFSET %s
     """, params + [per_page, offset])
 
     logs = cur.fetchall()
+
+    from services.security_login_email_crypto import (
+        LoginEmailCryptoError,
+        decrypt_attempted_email,
+    )
+
+    for log in logs:
+        ciphertext = log.pop(
+            "attempted_email_ciphertext",
+            None,
+        )
+
+        log["attempted_email_display"] = (
+            log.get("attempted_email_masked")
+            or "Unavailable"
+        )
+
+        if ciphertext:
+            try:
+                log["attempted_email_display"] = (
+                    decrypt_attempted_email(
+                        ciphertext,
+                        system_log_id=int(log["log_id"]),
+                    )
+                )
+            except LoginEmailCryptoError:
+                # Keep the masked fallback; never expose
+                # ciphertext or encryption error details.
+                pass
+
+    affected_spa_ids = sorted({
+        int(log["spa_id"])
+        for log in logs
+        if log["spa_id"] is not None
+    })
+
+    business_names = {}
+
+    if affected_spa_ids:
+        cur.execute(
+            """
+            SELECT spa_id, spa_name
+            FROM spas
+            WHERE spa_id = ANY(%s)
+            """,
+            (affected_spa_ids,),
+        )
+
+        business_names = {
+            row["spa_id"]: row["spa_name"]
+            for row in cur.fetchall()
+        }
+
+    for log in logs:
+        log["affected_business_name"] = (
+            business_names.get(log["spa_id"])
+        )
 
     cur.execute("""
         SELECT DISTINCT category
@@ -44650,7 +44718,7 @@ def system_activity():
     cur.close()
     conn.close()
 
-    return render_template(
+    response = app.make_response(render_template(
         "system_activity.html",
         logs=logs,
         categories=categories,
@@ -44664,7 +44732,10 @@ def system_activity():
         system_health_cards=system_health_cards,
         monitoring_settings=monitoring_settings,
         security_csrf_token=security_csrf_token
-    )
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.route(
@@ -69452,6 +69523,200 @@ def accept_business_invitation(token):
     )
 
 
+
+def _log_failed_business_login(
+    attempted_email,
+    failure_reason,
+    message,
+    severity="WARNING",
+    spa_id=None,
+    related_type=None,
+    related_id=None,
+):
+    """
+    Preserve the original security event and separately
+    record privacy-conscious login attempt details.
+
+    Failure to save optional details must never interfere
+    with the existing authentication result.
+    """
+    log_id = log_event(
+        "SECURITY",
+        message,
+        severity=severity,
+        spa_id=spa_id,
+        related_type=related_type,
+        related_id=related_id,
+    )
+
+    if log_id is None:
+        return None
+
+    conn = None
+    cur = None
+
+    try:
+        normalized_email = str(
+            attempted_email or ""
+        ).strip().lower()
+
+        masked_email = None
+
+        if "@" in normalized_email:
+            local, domain = normalized_email.split("@", 1)
+            if local and domain:
+                masked_email = (
+                    local[:1] + "***@" + domain
+                )[:260]
+
+        secret = app.secret_key
+
+        if isinstance(secret, str):
+            secret = secret.encode("utf-8")
+
+        if not secret:
+            raise RuntimeError(
+                "Security fingerprint secret unavailable."
+            )
+
+        email_fingerprint = None
+
+        if normalized_email:
+            email_fingerprint = hmac.new(
+                secret,
+                (
+                    "business-login-email:"
+                    + normalized_email
+                ).encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+
+        # Reuse the existing privacy-safe source helper.
+        # Apply a second domain-specific HMAC so login
+        # fingerprints remain distinct from reset events.
+        source_reference = _password_reset_source_hash()
+
+        source_fingerprint = hmac.new(
+            secret,
+            (
+                "business-login-source:"
+                + source_reference
+            ).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+        # Classify the untrusted User-Agent into broad
+        # families. Never persist its raw contents.
+        agent = str(
+            request.headers.get("User-Agent") or ""
+        )[:512].lower()
+
+        if "edg/" in agent:
+            browser = "Edge"
+        elif "firefox/" in agent:
+            browser = "Firefox"
+        elif "chrome/" in agent or "crios/" in agent:
+            browser = "Chrome"
+        elif "safari/" in agent:
+            browser = "Safari"
+        else:
+            browser = "Unknown"
+
+        if "iphone" in agent:
+            platform = "iPhone"
+        elif "ipad" in agent:
+            platform = "iPad"
+        elif "android" in agent:
+            platform = "Android"
+        elif "windows" in agent:
+            platform = "Windows"
+        elif "macintosh" in agent or "mac os" in agent:
+            platform = "macOS"
+        elif "linux" in agent:
+            platform = "Linux"
+        else:
+            platform = "Unknown"
+
+
+        encrypted_email = None
+
+        if (
+            normalized_email
+            and os.environ.get(
+                "SECURITY_LOGIN_EMAIL_ENCRYPTION_KEY"
+            )
+        ):
+            try:
+                from services.security_login_email_crypto import (
+                    encrypt_attempted_email,
+                )
+
+                encrypted_email = encrypt_attempted_email(
+                    normalized_email,
+                    system_log_id=int(log_id),
+                )
+
+            except Exception as exc:
+                # Do not print email addresses, keys, or ciphertext.
+                print(
+                    "[LOGIN SECURITY EMAIL ENCRYPTION ERROR] "
+                    + type(exc).__name__,
+                    flush=True,
+                )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO security_login_attempt_details (
+                system_log_id,
+                failure_reason,
+                login_channel,
+                attempted_email_masked,
+                attempted_email_ciphertext,
+                attempted_email_fingerprint,
+                source_fingerprint,
+                browser_family,
+                platform_family
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (system_log_id) DO NOTHING
+            """,
+            (
+                log_id,
+                failure_reason,
+                "web",
+                masked_email,
+                encrypted_email,
+                email_fingerprint,
+                source_fingerprint,
+                browser,
+                platform,
+            ),
+        )
+
+        conn.commit()
+
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+
+        print(
+            "[LOGIN SECURITY CONTEXT ERROR] "
+            + type(exc).__name__,
+            flush=True,
+        )
+
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+    return log_id
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -69485,7 +69750,9 @@ def login():
             cur.close()
             conn.close()
 
-            log_security(
+            _log_failed_business_login(
+                email,
+                "no_active_account",
                 "Login failed: user account not found.",
                 severity="WARNING",
                 related_type="business_login"
@@ -69525,7 +69792,9 @@ def login():
             cur.close()
             conn.close()
 
-            log_security(
+            _log_failed_business_login(
+                email,
+                "account_locked",
                 "Login blocked: account temporarily locked.",
                 severity="ALERT",
                 spa_id=user[1],
@@ -69563,7 +69832,9 @@ def login():
             conn.close()
 
             if newly_locked:
-                log_security(
+                _log_failed_business_login(
+                    email,
+                    "lockout_triggered",
                     "Login temporarily locked after "
                     "repeated invalid passwords.",
                     severity="ALERT",
@@ -69582,7 +69853,9 @@ def login():
                     "error",
                 )
             else:
-                log_security(
+                _log_failed_business_login(
+                    email,
+                    "invalid_password",
                     "Login failed: invalid password.",
                     severity="WARNING",
                     spa_id=user[1],
