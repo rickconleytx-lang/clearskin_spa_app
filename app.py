@@ -46447,7 +46447,7 @@ def update_dropdown_labels():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    "can_manage_public_website"
 )
 def public_website_about_photo():
     spa_id = current_spa_id()
