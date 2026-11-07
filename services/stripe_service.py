@@ -3297,7 +3297,14 @@ def sync_stripe_subscription_snapshot(
             a.stripe_billing_account_id,
             a.spa_id,
             a.stripe_customer_id,
-            st.tier_code
+            st.tier_code,
+            a.stripe_subscription_status,
+            a.trial_start,
+            a.trial_end,
+            a.cancel_at_period_end,
+            a.cancel_at,
+            a.canceled_at,
+            a.ended_at
         FROM stripe_billing_accounts a
         JOIN spas s
           ON s.spa_id = a.spa_id
@@ -3327,6 +3334,13 @@ def sync_stripe_subscription_snapshot(
         spa_id,
         stored_customer_id,
         spa_tier_code,
+        previous_status,
+        previous_trial_start,
+        previous_trial_end,
+        previous_cancel_at_period_end,
+        previous_cancel_at,
+        previous_canceled_at,
+        previous_ended_at,
     ) = billing_row
 
     spa_tier_code = str(
@@ -3772,6 +3786,117 @@ def sync_stripe_subscription_snapshot(
     psp_subscription_status = str(
         spa_status_row[0] or ""
     ).strip()
+
+    # Preserve a verified display quote only when the incoming
+    # Stripe subscription proves both pricing and lifecycle are
+    # unchanged. Missing or unsupported data remains conservative:
+    # invalidate the saved quote rather than assume it is current.
+    #
+    # The billing account is already locked by this transaction.
+    # No Stripe API call is made during this comparison.
+    lifecycle_unchanged = (
+        previous_status,
+        previous_trial_start,
+        previous_trial_end,
+        previous_cancel_at_period_end,
+        previous_cancel_at,
+        previous_canceled_at,
+        previous_ended_at,
+    ) == (
+        subscription_status,
+        trial_start,
+        trial_end,
+        cancel_at_period_end,
+        cancel_at,
+        canceled_at,
+        ended_at,
+    )
+
+    incoming_quote = None
+
+    if lifecycle_unchanged:
+        item_data = (subscription.get("items") or {}).get("data")
+
+        subscription_discounts_explicit = (
+            isinstance(subscription.get("discounts"), list)
+            or (
+                "discount" in subscription
+                and (
+                    subscription["discount"] is None
+                    or isinstance(subscription["discount"], dict)
+                )
+            )
+        )
+
+        item_discounts_explicit = (
+            isinstance(item_data, list)
+            and len(item_data) == 1
+            and isinstance(item_data[0], dict)
+            and isinstance(item_data[0].get("discounts"), list)
+        )
+
+        if (
+            subscription_discounts_explicit
+            and item_discounts_explicit
+        ):
+            try:
+                from services.stripe_billing_quote import (
+                    summarize_stripe_billing,
+                )
+                incoming_quote = summarize_stripe_billing(
+                    subscription
+                )
+            except Exception:
+                incoming_quote = None
+
+    preserve_verified_quote = False
+
+    if incoming_quote is not None:
+        cursor.execute(
+            """
+            SELECT quote_json, verified_at, invalidated_at
+            FROM stripe_billing_display_snapshots
+            WHERE stripe_billing_account_id = %s
+              AND spa_id = %s
+              AND environment = %s
+              AND stripe_subscription_id = %s
+            FOR UPDATE
+            """,
+            (
+                stripe_billing_account_id,
+                spa_id,
+                environment,
+                subscription_id,
+            ),
+        )
+        previous_quote_row = cursor.fetchone()
+
+        preserve_verified_quote = (
+            previous_quote_row is not None
+            and previous_quote_row[1] is not None
+            and previous_quote_row[2] is None
+            and previous_quote_row[0] == incoming_quote
+        )
+
+    if not preserve_verified_quote:
+        cursor.execute(
+            """
+            UPDATE stripe_billing_display_snapshots
+            SET invalidated_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE stripe_billing_account_id = %s
+              AND spa_id = %s
+              AND environment = %s
+              AND stripe_subscription_id = %s
+              AND verified_at IS NOT NULL
+            """,
+            (
+                stripe_billing_account_id,
+                spa_id,
+                environment,
+                subscription_id,
+            ),
+        )
 
     return {
         "stripe_billing_account_id": (

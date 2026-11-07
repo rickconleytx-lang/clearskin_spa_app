@@ -7349,16 +7349,66 @@ def master_admin_business_detail(spa_id):
             for tier_row in cur.fetchall()
         ]
 
-        return render_template(
-            "master_admin/businesses/business_detail.html",
-            business=business,
-            subscription_tiers=subscription_tiers,
-            security_csrf_token=_security_form_csrf_token(),
+        from services.stripe_billing_snapshot import (
+            load_billing_snapshot,
+        )
+
+        billing_snapshot = load_billing_snapshot(
+            cur,
+            spa_id=spa_id,
+            environment=environment,
+            timezone_name=get_current_spa_timezone(spa_id),
         )
 
     finally:
         cur.close()
         conn.close()
+
+    billing_details = (
+        billing_snapshot.get("billing_details")
+        if billing_snapshot else None
+    )
+
+    return render_template(
+        "master_admin/businesses/business_detail.html",
+        business=business,
+        billing_details=billing_details,
+        billing_snapshot=billing_snapshot,
+        subscription_tiers=subscription_tiers,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/businesses/<int:spa_id>/billing/refresh",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def refresh_master_admin_business_billing(spa_id):
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    from services.stripe_billing_refresh import (
+        run_billing_refresh,
+    )
+
+    result = run_billing_refresh(
+        connection_factory=get_db_connection,
+        spa_id=spa_id,
+        environment=get_stripe_environment(),
+        mode="manual",
+    )
+
+    _flash_billing_refresh_result(result["status"])
+
+    return redirect(
+        url_for("master_admin_business_detail", spa_id=spa_id)
+    )
+
+
 
 
 @app.route(
@@ -63096,12 +63146,48 @@ def manage_subscription():
                 spa_id=spa_id,
             )
         )
+        from services.stripe_billing_snapshot import (
+            load_billing_snapshot,
+        )
+
+        billing_snapshot = load_billing_snapshot(
+            cur,
+            spa_id=spa_id,
+            environment=get_stripe_environment(),
+            timezone_name=get_current_spa_timezone(spa_id),
+        )
+
     finally:
         cur.close()
         conn.close()
 
+    from services.stripe_billing_quote import (
+        utc_to_business_time,
+    )
+
+    business_timezone = get_current_spa_timezone(spa_id)
+
+    billing_details = (
+        billing_snapshot.get("billing_details")
+        if billing_snapshot else None
+    )
+
+    trial_end_local = utc_to_business_time(
+        subscription_summary.get("trial_end"),
+        business_timezone,
+    )
+
+    current_period_end_local = utc_to_business_time(
+        subscription_summary.get("current_period_end"),
+        business_timezone,
+    )
+
     return render_template(
         "manage_subscription.html",
+        billing_details=billing_details,
+        billing_snapshot=billing_snapshot,
+        trial_end_local=trial_end_local,
+        current_period_end_local=current_period_end_local,
         subscription_summary=subscription_summary,
         open_resubscription=open_resubscription,
         subscription_terms_version=(
@@ -63109,6 +63195,70 @@ def manage_subscription():
         ),
         security_csrf_token=_security_form_csrf_token(),
     )
+
+
+@app.route("/account/subscription/billing/refresh", methods=["POST"])
+@login_required
+@spa_required
+def refresh_customer_subscription_billing():
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    from services.stripe_billing_refresh import (
+        run_billing_refresh,
+    )
+
+    result = run_billing_refresh(
+        connection_factory=get_db_connection,
+        spa_id=current_spa_id(),
+        environment=get_stripe_environment(),
+        mode="manual",
+    )
+
+    _flash_billing_refresh_result(result["status"])
+
+    return redirect(url_for("manage_subscription"))
+
+
+def _flash_billing_refresh_result(status):
+    messages = {
+        "verified": (
+            "Billing information refreshed successfully.",
+            "success",
+        ),
+        "cooldown": (
+            "Billing was refreshed recently. Please try again shortly.",
+            "info",
+        ),
+        "busy": (
+            "A billing refresh is already in progress.",
+            "info",
+        ),
+        "no_subscription": (
+            "No Stripe subscription is available to refresh.",
+            "warning",
+        ),
+        "unavailable": (
+            "Stripe billing information could not be verified. "
+            "Previously verified information has been preserved.",
+            "warning",
+        ),
+    }
+
+    message, category = messages.get(
+        status,
+        ("Billing refresh could not be completed.", "warning"),
+    )
+    flash(message, category)
+
 
 
 
@@ -118417,6 +118567,24 @@ def morning_briefing_content():
         )
     )
 
+    from services.stripe_billing_snapshot import (
+        load_billing_snapshot,
+    )
+
+    business_timezone = get_current_spa_timezone(spa_id)
+    billing_snapshot = None
+
+    if (
+        current_business_unit_membership_role_code()
+        == "organization_admin"
+    ):
+        billing_snapshot = load_billing_snapshot(
+            cur,
+            spa_id=spa_id,
+            environment=get_stripe_environment(),
+            timezone_name=business_timezone,
+        )
+
     if not appointments_enabled and square_enabled:
         peachpos_summary = _get_peachpos_sales_summary(
             cur,
@@ -118919,6 +119087,20 @@ def morning_briefing_content():
     cur.close()
     conn.close()
 
+    from services.stripe_billing_quote import (
+        utc_to_business_time,
+    )
+
+    trial_end_local = utc_to_business_time(
+        subscription_summary.get("trial_end"),
+        business_timezone,
+    )
+
+    billing_details = (
+        billing_snapshot.get("billing_details")
+        if billing_snapshot else None
+    )
+
     show_login_splash = False
     return render_template(
         "morning_briefing.html",
@@ -118934,6 +119116,9 @@ def morning_briefing_content():
         spa_now=spa_now,
         action_cards=action_cards,
         setup_progress=setup_progress,
+        billing_details=billing_details,
+        billing_snapshot=billing_snapshot,
+        trial_end_local=trial_end_local,
         subscription_summary=subscription_summary,
         show_coach_welcome=show_coach_welcome,
         show_setup_complete_welcome=(
@@ -140598,6 +140783,98 @@ def scheduled_purge_system_logs():
         )
 
 
+
+def scheduled_refresh_trial_billing_snapshots():
+    """
+    Refresh due Stripe trial billing snapshots without blocking
+    customer requests.
+
+    Database claims enforce cross-worker concurrency protection.
+    At most eight trial businesses are processed per run.
+    """
+    from services.stripe_billing_refresh import (
+        run_billing_refresh,
+    )
+
+    environment = get_stripe_environment()
+    conn = None
+    cur = None
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT a.spa_id
+            FROM stripe_billing_accounts a
+            LEFT JOIN stripe_billing_display_snapshots snap
+              ON snap.stripe_billing_account_id =
+                 a.stripe_billing_account_id
+            WHERE a.environment = %s
+              AND a.stripe_subscription_status = 'trialing'
+              AND a.stripe_subscription_id IS NOT NULL
+              AND (
+                  snap.last_auto_attempt_at IS NULL
+                  OR snap.last_auto_attempt_at
+                     <= NOW() - INTERVAL '24 hours'
+              )
+              AND (
+                  snap.verified_at IS NULL
+                  OR snap.verified_at
+                     <= NOW() - INTERVAL '24 hours'
+              )
+              AND (
+                  snap.refresh_lock_expires_at IS NULL
+                  OR snap.refresh_lock_expires_at <= NOW()
+              )
+            ORDER BY
+                snap.last_auto_attempt_at NULLS FIRST,
+                a.stripe_billing_account_id
+            LIMIT 8
+            """,
+            (environment,),
+        )
+
+        spa_ids = [row[0] for row in cur.fetchall()]
+
+    except Exception:
+        app.logger.exception(
+            "Scheduled trial billing candidate lookup failed."
+        )
+        return
+
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+    # No database connection remains open during Stripe requests.
+    for spa_id in spa_ids:
+        try:
+            result = run_billing_refresh(
+                connection_factory=get_db_connection,
+                spa_id=spa_id,
+                environment=environment,
+                mode="auto",
+            )
+
+            if result.get("status") == "unavailable":
+                app.logger.warning(
+                    "Trial billing verification unavailable "
+                    "for business %s.",
+                    spa_id,
+                )
+
+        except Exception:
+            app.logger.exception(
+                "Scheduled trial billing refresh failed "
+                "for business %s.",
+                spa_id,
+            )
+
+
 def start_scheduler():
     scheduler = BackgroundScheduler()
 
@@ -140783,6 +141060,18 @@ def start_scheduler():
             flush=True
         )
 
+
+    scheduler.add_job(
+        scheduled_refresh_trial_billing_snapshots,
+        "interval",
+        hours=1,
+        id="trial_billing_snapshot_refresh_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+        next_run_time=startup_time + timedelta(seconds=210),
+    )
 
     scheduler.start()
     print("Scheduler started.", flush=True)

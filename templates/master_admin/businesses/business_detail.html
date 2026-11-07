@@ -418,6 +418,146 @@
     <section class="detail-card detail-card-wide">
         <h2>Signup &amp; Billing</h2>
 
+        {% if business.stripe_subscription_id %}
+            {% if billing_snapshot and billing_snapshot.verified_at_local %}
+                <p>
+                    <strong>
+                        {% if billing_snapshot.is_stale %}
+                            Previously verified with Stripe:
+                        {% else %}
+                            Last verified with Stripe:
+                        {% endif %}
+                    </strong>
+                    {{ billing_snapshot.verified_at_local.strftime(
+                        "%B %-d, %Y at %-I:%M %p %Z"
+                    ) }}
+                </p>
+
+                {% if billing_snapshot.is_stale %}
+                    <p>
+                        This billing snapshot may be outdated.
+                        Refresh Billing to verify current pricing.
+                    </p>
+                {% endif %}
+            {% else %}
+                <p>
+                    No verified billing snapshot is available.
+                    Use Refresh Billing to retrieve current pricing.
+                </p>
+            {% endif %}
+        {% endif %}
+
+
+        {% if business.stripe_subscription_id %}
+            <form
+                method="POST"
+                action="{{ url_for(
+                    'refresh_master_admin_business_billing',
+                    spa_id=business.spa_id
+                ) }}"
+            >
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+                <button type="submit" class="tool-pill tool-pill-small">
+                    Refresh Billing
+                </button>
+            </form>
+        {% endif %}
+
+
+        {% if business.stripe_subscription_id %}
+            <h3>Stripe Subscription Pricing</h3>
+
+            {% if billing_details %}
+                <dl class="detail-list detail-list-wide">
+
+                    <div>
+                        <dt>Regular Subscription Price</dt>
+                        <dd>
+                            {{ billing_details.base_display }}
+                            / {{ billing_details.billing_interval }}
+                        </dd>
+                    </div>
+
+                    {% if billing_details.has_discount %}
+                        <div>
+                            <dt>Active Promotion</dt>
+                            <dd>
+                                {{ billing_details.discount_name }}
+                                (−{{ billing_details.discount_display }})
+                            </dd>
+                        </div>
+                    {% endif %}
+
+                    <div>
+                        <dt>
+                            {% if billing_snapshot
+                                  and billing_snapshot.is_stale %}
+                                Last Verified Recurring Subscription
+                            {% else %}
+                                Effective Recurring Subscription
+                            {% endif %}
+                        </dt>
+                        <dd>
+                            <strong>
+                                {{ billing_details.effective_display }}
+                                / {{ billing_details.billing_interval }}
+                            </strong>
+                        </dd>
+                    </div>
+
+                    {% if billing_details.next_billing_local
+                          and not business.cancel_at_period_end %}
+                        <div>
+                            <dt>
+                                {% if billing_details.stripe_status == "trialing" %}
+                                    Expected First Billing
+                                {% else %}
+                                    Next Billing
+                                {% endif %}
+                            </dt>
+                            <dd>
+                                {{ billing_details.next_billing_local.strftime(
+                                    "%B %-d, %Y at %-I:%M %p %Z"
+                                ) }}
+                            </dd>
+                        </div>
+                    {% endif %}
+
+                    {% if billing_details.discount_duration == "repeating"
+                          and billing_details.discount_ends %}
+                        <div>
+                            <dt>Promotion Expiration</dt>
+                            <dd>
+                                {{ billing_details.discount_ends.strftime(
+                                    "%B %-d, %Y"
+                                ) }}
+                            </dd>
+                        </div>
+                    {% endif %}
+
+                </dl>
+
+                <p>
+                    Stripe subscription pricing before applicable
+                    taxes, prorations and invoice adjustments.
+                    PSP complimentary billing arrangements are
+                    managed separately.
+                </p>
+
+            {% else %}
+                <p class="detail-empty">
+                    Current recurring pricing cannot be verified
+                    for this Stripe subscription.
+                </p>
+            {% endif %}
+
+        {% endif %}
+
+
         {% if business.stripe_checkout_signup_id %}
 
             <dl class="detail-list detail-list-wide">

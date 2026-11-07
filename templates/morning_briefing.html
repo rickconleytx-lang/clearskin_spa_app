@@ -234,6 +234,83 @@
     </div>
 
 
+        {% if is_organization_admin
+              and not subscription_summary.show_trial_card
+              and subscription_summary.stripe_status == "active" %}
+
+        <!-- Active Subscription Billing -->
+        <div class="briefing-summary-card">
+
+            <div class="briefing-card-title">
+                {{ subscription_summary.tier_name }} Subscription
+            </div>
+            {% if is_organization_admin
+                  and subscription_summary.stripe_subscription_id %}
+                <div class="briefing-card-detail">
+                    {% if billing_snapshot
+                          and billing_snapshot.verified_at_local %}
+                        {% if billing_snapshot.is_stale %}
+                            Previously verified billing information:
+                        {% else %}
+                            Billing verified:
+                        {% endif %}
+                        {{ billing_snapshot.verified_at_local.strftime(
+                            "%b %-d, %Y %-I:%M %p %Z"
+                        ) }}
+                    {% else %}
+                        Billing has not yet been verified.
+                    {% endif %}
+                </div>
+            {% endif %}
+
+
+            {% if billing_details %}
+                <div class="briefing-card-value">
+                    {{ billing_details.effective_display }}
+                </div>
+
+                <div class="briefing-card-detail">
+                    {% if billing_details.billing_interval == "month" %}
+                        Per Month
+                    {% elif billing_details.billing_interval == "year" %}
+                        Per Year
+                    {% endif %}
+
+                    {% if billing_details.has_discount %}
+                        — {{ billing_details.discount_name }}
+                    {% endif %}
+                </div>
+
+                {% if subscription_summary.cancel_at_period_end %}
+                    <div class="briefing-card-detail">
+                        Cancellation scheduled
+                    </div>
+                {% elif billing_details.next_billing_local %}
+                    <div class="briefing-card-detail">
+                        Next billing:
+                        {{ billing_details.next_billing_local.strftime(
+                            "%B %-d, %Y %Z"
+                        ) }}
+                    </div>
+                {% endif %}
+
+            {% else %}
+                <div class="briefing-card-detail">
+                    Current subscription amount unavailable.
+                </div>
+            {% endif %}
+
+            <div style="margin-top:12px;">
+                <a href="{{ url_for('manage_subscription') }}"
+                   class="tool-pill tool-pill-small">
+                    Manage Subscription
+                </a>
+            </div>
+
+        </div>
+
+        {% endif %}
+
         {% if subscription_summary.show_trial_card %}
 
         <!-- Solo Free Trial -->
@@ -242,6 +319,25 @@
             <div class="briefing-card-title">
                 {{ subscription_summary.tier_name }} Free Trial
             </div>
+            {% if is_organization_admin
+                  and subscription_summary.stripe_subscription_id %}
+                <div class="briefing-card-detail">
+                    {% if billing_snapshot
+                          and billing_snapshot.verified_at_local %}
+                        {% if billing_snapshot.is_stale %}
+                            Previously verified billing information:
+                        {% else %}
+                            Billing verified:
+                        {% endif %}
+                        {{ billing_snapshot.verified_at_local.strftime(
+                            "%b %-d, %Y %-I:%M %p %Z"
+                        ) }}
+                    {% else %}
+                        Billing has not yet been verified.
+                    {% endif %}
+                </div>
+            {% endif %}
+
 
             <div class="briefing-card-value">
                 {{ subscription_summary.days_remaining }}
@@ -252,23 +348,42 @@
                 {% endif %}
             </div>
 
-            {% if subscription_summary.trial_end %}
+            {% if trial_end_local and not subscription_summary.cancel_at_period_end %}
                 <div class="briefing-card-detail">
                     Billing begins
-                    {{ subscription_summary.trial_end.strftime(
+                    {{ trial_end_local.strftime(
                         "%B %-d, %Y"
                     ) }}
                 </div>
             {% endif %}
 
-            {% if subscription_summary.amount_display %}
+            {% if is_organization_admin and billing_details %}
                 <div class="briefing-card-detail">
-                    {{ subscription_summary.amount_display }}
-                    {% if subscription_summary.billing_interval == "month" %}
+                    {{ billing_details.effective_display }}
+                    {% if billing_details.billing_interval == "month" %}
                         / month
-                    {% elif subscription_summary.billing_interval == "year" %}
+                    {% elif billing_details.billing_interval == "year" %}
                         / year
                     {% endif %}
+                    {% if billing_details.has_discount %}
+                        — Includes {{ billing_details.discount_name }}
+                    {% endif %}
+                </div>
+
+                {% if billing_details.next_billing_local and not subscription_summary.cancel_at_period_end %}
+                    <div class="briefing-card-detail">
+                        Expected first billing:
+                        {{ billing_details.next_billing_local.strftime(
+                            "%B %-d, %Y %Z"
+                        ) }}
+                    </div>
+                {% endif %}
+
+            {% elif is_organization_admin
+                    and subscription_summary.stripe_subscription_id %}
+                <div class="briefing-card-detail">
+                    Current subscription price unavailable.
+                    See Manage Subscription.
                 </div>
             {% endif %}
 

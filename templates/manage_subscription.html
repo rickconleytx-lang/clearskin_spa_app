@@ -50,12 +50,12 @@
         </strong>
     </p>
 
-    {% if subscription_summary.trial_end %}
+    {% if trial_end_local %}
         <p>
             Your free trial ends
             <strong>
-                {{ subscription_summary.trial_end.strftime(
-                    "%B %-d, %Y at %-I:%M %p"
+                {{ trial_end_local.strftime(
+                    "%B %-d, %Y at %-I:%M %p %Z"
                 ) }}
             </strong>.
         </p>
@@ -86,11 +86,68 @@
 
     <h2>Billing</h2>
 
-    {% if subscription_summary.amount_display %}
-        <p>
-            <strong>Subscription Amount:</strong>
-            {{ subscription_summary.amount_display }}
+    {% if subscription_summary.stripe_subscription_id %}
+        {% if billing_snapshot and billing_snapshot.verified_at_local %}
+            <p>
+                <small>
+                    {% if billing_snapshot.is_stale %}
+                        <strong>Previously verified with Stripe:</strong>
+                    {% else %}
+                        <strong>Last verified with Stripe:</strong>
+                    {% endif %}
+                    {{ billing_snapshot.verified_at_local.strftime(
+                        "%B %-d, %Y at %-I:%M %p %Z"
+                    ) }}
+                </small>
+            </p>
 
+            {% if billing_snapshot.is_stale %}
+                <p>
+                    Billing information may be outdated.
+                    Previously verified values are shown.
+                    Select Refresh Billing for the latest information.
+                </p>
+            {% endif %}
+        {% else %}
+            <p>
+                Billing information has not yet been verified.
+                Select Refresh Billing to retrieve it from Stripe.
+            </p>
+        {% endif %}
+    {% endif %}
+
+
+    {% if subscription_summary.stripe_subscription_id %}
+        <form
+            method="POST"
+            action="{{ url_for('refresh_customer_subscription_billing') }}"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+            <button type="submit" class="tool-pill tool-pill-small">
+                Refresh Billing
+            </button>
+        </form>
+    {% endif %}
+
+
+    {% if billing_details or subscription_summary.amount_display %}
+        <p>
+            <strong>
+                {% if billing_details %}
+                    Regular Plan Price:
+                {% else %}
+                    Last Synchronized Plan Price:
+                {% endif %}
+            </strong>
+            {% if billing_details %}
+                {{ billing_details.base_display }}
+            {% else %}
+                {{ subscription_summary.amount_display }}
+            {% endif %}
             {% if subscription_summary.billing_interval == "month" %}
                 / month
             {% elif subscription_summary.billing_interval == "year" %}
@@ -99,10 +156,75 @@
         </p>
     {% endif %}
 
-    {% if subscription_summary.current_period_end %}
+    {% if billing_details %}
+        {% if billing_details.has_discount %}
+            <p>
+                <strong>Active Promotion:</strong>
+                {{ billing_details.discount_name }}
+                (−{{ billing_details.discount_display }})
+            </p>
+        {% endif %}
+
+        <p>
+            <strong>
+                {% if billing_snapshot and billing_snapshot.is_stale %}
+                    Last Verified Recurring Subscription:
+                {% else %}
+                    Current Recurring Subscription:
+                {% endif %}
+            </strong>
+            {{ billing_details.effective_display }}
+            {% if billing_details.billing_interval == "month" %}
+                / month
+            {% elif billing_details.billing_interval == "year" %}
+                / year
+            {% endif %}
+        </p>
+
+        <p class="text-muted">
+            Subscription amount before applicable taxes,
+            prorations, and other invoice adjustments.
+        </p>
+
+        {% if billing_details.next_billing_local
+              and not subscription_summary.cancel_at_period_end %}
+            <p>
+                <strong>
+                    {% if billing_details.stripe_status == "trialing" %}
+                        Expected First Billing Date:
+                    {% else %}
+                        Next Billing Date:
+                    {% endif %}
+                </strong>
+                {{ billing_details.next_billing_local.strftime(
+                    "%B %-d, %Y at %-I:%M %p %Z"
+                ) }}
+            </p>
+        {% endif %}
+
+        {% if billing_details.discount_duration == "repeating"
+              and billing_details.discount_ends %}
+            <p>
+                <strong>Promotion Ends:</strong>
+                {{ billing_details.discount_ends.strftime(
+                    "%B %-d, %Y"
+                ) }}
+            </p>
+        {% endif %}
+
+    {% elif subscription_summary.stripe_subscription_id %}
+        <p>
+            <strong>Current Recurring Subscription:</strong>
+            Temporarily unavailable.
+            Please check your Stripe billing portal
+            for the latest billing information.
+        </p>
+    {% endif %}
+
+    {% if current_period_end_local %}
         <p>
             <strong>Current Billing Period Ends:</strong>
-            {{ subscription_summary.current_period_end.strftime(
+            {{ current_period_end_local.strftime(
                 "%B %-d, %Y"
             ) }}
         </p>
