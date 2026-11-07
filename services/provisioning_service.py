@@ -1228,6 +1228,22 @@ def _provision_new_business_record(
 
     spa_id = cursor.fetchone()[0]
 
+    # Assign every newly provisioned business a $2.00 monthly
+    # Coach Peach allowance. AI remains disabled until explicitly
+    # enabled through the existing Master Admin controls.
+    cursor.execute(
+        """
+        INSERT INTO psp_ai_budgets (
+            scope,
+            spa_id,
+            ai_enabled,
+            monthly_limit_usd
+        )
+        VALUES ('business', %s, FALSE, 2.00)
+        """,
+        (spa_id,),
+    )
+
     ensure_owner_employee_role(
         cursor,
         spa_id,

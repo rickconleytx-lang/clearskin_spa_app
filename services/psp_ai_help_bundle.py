@@ -34,6 +34,21 @@ def _focused_excerpt(content, question, limit):
 
     # Retain article context, with the rest dedicated to useful instructions.
     intro_size = min(340, limit // 6)
+
+    # Preserve a complete introductory paragraph when its ending
+    # is nearby. Keep the total article budget unchanged.
+    paragraph_end = content.find(
+        "\n",
+        intro_size,
+        min(len(content), intro_size + 301),
+    )
+
+    if (
+        paragraph_end >= 0
+        and paragraph_end <= limit // 3
+    ):
+        intro_size = paragraph_end
+
     focus_size = limit - intro_size - 30
     original = {
         word for word in _words(question)
