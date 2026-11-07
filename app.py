@@ -129918,6 +129918,118 @@ def login_security_settings():
     )
 
 
+
+# ==========================================================
+# PEACHPOS EVENT CALENDAR — BUSINESS CALENDAR PREFERENCE
+# ==========================================================
+
+# Enable only after Team dual-calendar workflows are released.
+TEAM_DUAL_CALENDAR_ENABLED = False
+
+
+def _available_preferred_calendar_types():
+    tier = current_subscription_tier_code()
+
+    if tier == "solo":
+        if has_subscription_feature("appointments"):
+            return ("appointment",)
+        return ()
+
+    if tier == "pos":
+        if has_subscription_feature("event_calendar"):
+            return ("event",)
+        return ()
+
+    if tier == "team":
+        allowed = []
+
+        if has_subscription_feature("appointments"):
+            allowed.append("appointment")
+
+        if (
+            TEAM_DUAL_CALENDAR_ENABLED
+            and has_subscription_feature("event_calendar")
+        ):
+            allowed.append("event")
+
+        return tuple(allowed)
+
+    return ()
+
+
+def _effective_preferred_calendar_type(stored_value, allowed):
+    if stored_value in allowed:
+        return stored_value
+
+    if "appointment" in allowed:
+        return "appointment"
+
+    if "event" in allowed:
+        return "event"
+
+    return None
+
+
+@app.route("/save_calendar_settings", methods=["POST"])
+@login_required
+@spa_required
+def save_calendar_settings():
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    calendar_type = request.form.get(
+        "calendar_type", ""
+    ).strip().lower()
+
+    allowed = _available_preferred_calendar_types()
+
+    if calendar_type not in {"appointment", "event"}:
+        abort(400)
+
+    if calendar_type not in allowed:
+        abort(403)
+
+    spa_id = current_spa_id()
+
+    if spa_id is None:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE spas
+            SET preferred_calendar_type = %s
+            WHERE spa_id = %s
+            """,
+            (calendar_type, spa_id),
+        )
+
+        if cur.rowcount != 1:
+            conn.rollback()
+            abort(404)
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash("Calendar settings saved successfully.", "success")
+    return redirect(url_for("admin"))
+
+
 @app.route("/admin")
 @login_required
 @spa_required
@@ -129940,8 +130052,24 @@ def admin():
     label_rows = cur.fetchall()
     dropdown_labels = {row[0]: row[1] for row in label_rows}
 
+    cur.execute("SELECT preferred_calendar_type FROM spas WHERE spa_id = %s", (spa_id,))
+    calendar_row = cur.fetchone()
+    stored_calendar_type = calendar_row[0] if calendar_row else None
+
     cur.close()
     conn.close()
+
+
+    calendar_available_types = _available_preferred_calendar_types()
+    calendar_current_type = _effective_preferred_calendar_type(
+        stored_calendar_type,
+        calendar_available_types,
+    )
+    calendar_can_edit = (
+        current_business_unit_membership_role_code()
+        == "organization_admin"
+    )
+    calendar_csrf_token = _security_form_csrf_token()
 
     return render_template(
         "admin.html",
@@ -129949,7 +130077,11 @@ def admin():
         timezone_options=BUSINESS_TIMEZONE_OPTIONS,
         utc_now=utc_now,
         spa_now=spa_now,
-        dropdown_labels=dropdown_labels
+        dropdown_labels=dropdown_labels,
+        calendar_available_types=calendar_available_types,
+        calendar_current_type=calendar_current_type,
+        calendar_can_edit=calendar_can_edit,
+        calendar_csrf_token=calendar_csrf_token
     )
 
 

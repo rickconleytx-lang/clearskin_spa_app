@@ -116,6 +116,81 @@ Cat 2
     </a>
 </div>
 <br>
+
+<div class="admin-section">
+    <h2>Calendar Settings</h2>
+
+    <p>
+        Select the preferred calendar for your business.
+        Available calendars depend on your Peach Suite Pro subscription.
+    </p>
+
+    {% if calendar_available_types %}
+
+        {% if calendar_can_edit %}
+        <form method="POST"
+              action="{{ url_for('save_calendar_settings') }}">
+
+            <input type="hidden"
+                   name="security_csrf_token"
+                   value="{{ calendar_csrf_token }}">
+
+            <div class="form-group">
+                <label for="calendar_type">Preferred Calendar</label>
+
+                <select name="calendar_type"
+                        id="calendar_type"
+                        required>
+
+                    {% if "appointment" in calendar_available_types %}
+                    <option value="appointment"
+                            {% if calendar_current_type == "appointment" %}
+                                selected
+                            {% endif %}>
+                        Appointment Calendar
+                    </option>
+                    {% endif %}
+
+                    {% if "event" in calendar_available_types %}
+                    <option value="event"
+                            {% if calendar_current_type == "event" %}
+                                selected
+                            {% endif %}>
+                        Event Calendar
+                    </option>
+                    {% endif %}
+
+                </select>
+            </div>
+
+            <p>
+                Changing your preferred calendar does not delete,
+                cancel, or convert existing calendar records.
+            </p>
+
+            <button type="submit" class="btn">
+                Save Calendar Settings
+            </button>
+        </form>
+
+        {% else %}
+        <p>
+            <strong>Preferred Calendar:</strong>
+            {{ "Event Calendar" if calendar_current_type == "event"
+               else "Appointment Calendar" }}
+        </p>
+        <p>Only a Business Administrator can change this setting.</p>
+        {% endif %}
+
+    {% else %}
+        <p>
+            No calendar is currently available under this subscription.
+        </p>
+    {% endif %}
+</div>
+
+<br>
+
 <p style="color: red";>Important: Each Business MUST set its Time Zone</p>
 
 <div class="admin-section">
