@@ -130398,6 +130398,107 @@ def event_unit_status(event_unit_id):
     return redirect(url_for("event_units_home"))
 
 
+
+# ==========================================================
+# EVENT CALENDAR — BUSINESS CUSTOM FIELD LABELS
+# ==========================================================
+
+@app.route(
+    "/admin/event-custom-labels",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+def save_event_custom_labels():
+
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    spa_id = current_spa_id()
+    actor_id = session.get("user_id")
+
+    if spa_id is None or actor_id is None:
+        abort(403)
+
+    labels = {}
+
+    for slot in (1, 2, 3):
+        raw = request.form.get(
+            f"event_custom_label_{slot}"
+        )
+
+        if raw is None:
+            abort(400)
+
+        label = raw.strip() or f"Default {slot}"
+
+        if (
+            len(label) > 100
+            or any(ord(ch) < 32 for ch in label)
+        ):
+            abort(400)
+
+        labels[slot] = label
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT to_regclass(
+                'public.event_calendar_custom_labels'
+            )
+        """)
+
+        if cur.fetchone()[0] is None:
+            abort(503)
+
+        for slot, label in labels.items():
+            cur.execute(
+                """
+                INSERT INTO event_calendar_custom_labels (
+                    spa_id,
+                    slot_number,
+                    field_label,
+                    updated_by
+                )
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (spa_id, slot_number)
+                DO UPDATE SET
+                    field_label = EXCLUDED.field_label,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (spa_id, slot, label, actor_id),
+            )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Event custom field names saved successfully.",
+        "success"
+    )
+
+    return redirect(url_for("admin"))
+
+
 @app.route("/admin")
 @login_required
 @spa_required
@@ -130424,6 +130525,43 @@ def admin():
     calendar_row = cur.fetchone()
     stored_calendar_type = calendar_row[0] if calendar_row else None
 
+
+    event_custom_fields_visible = has_subscription_feature(
+        "event_calendar"
+    )
+
+    event_custom_labels = {
+        slot: f"Default {slot}"
+        for slot in (1, 2, 3)
+    }
+
+    event_custom_fields_ready = False
+
+    if event_custom_fields_visible:
+        cur.execute("""
+            SELECT to_regclass(
+                'public.event_calendar_custom_labels'
+            )
+        """)
+
+        event_custom_fields_ready = (
+            cur.fetchone()[0] is not None
+        )
+
+        if event_custom_fields_ready:
+            cur.execute(
+                """
+                SELECT slot_number, field_label
+                FROM event_calendar_custom_labels
+                WHERE spa_id = %s
+                """,
+                (spa_id,),
+            )
+
+            for slot, label in cur.fetchall():
+                if slot in event_custom_labels:
+                    event_custom_labels[slot] = label
+
     cur.close()
     conn.close()
 
@@ -130449,7 +130587,10 @@ def admin():
         calendar_available_types=calendar_available_types,
         calendar_current_type=calendar_current_type,
         calendar_can_edit=calendar_can_edit,
-        calendar_csrf_token=calendar_csrf_token
+        calendar_csrf_token=calendar_csrf_token,
+        event_custom_fields_visible=event_custom_fields_visible,
+        event_custom_fields_ready=event_custom_fields_ready,
+        event_custom_labels=event_custom_labels
     )
 
 
