@@ -39801,6 +39801,11 @@ def build_navigation_access(role_code):
 
         # Main business categories
         "can_view_calendar": False,
+
+        # Event Calendar permissions
+        "can_view_events": False,
+        "can_manage_events": False,
+        "can_manage_event_units": False,
         "can_view_communications": False,
         "can_view_clients": False,
         "can_view_inventory": False,
@@ -39860,6 +39865,9 @@ def build_navigation_access(role_code):
             "can_view_business_summary": True,
 
             "can_view_calendar": True,
+            "can_view_events": True,
+            "can_manage_events": True,
+            "can_manage_event_units": True,
             "can_view_clients": True,
             "can_view_inventory": True,
             "can_view_employees": True,
@@ -130028,6 +130036,366 @@ def save_calendar_settings():
 
     flash("Calendar settings saved successfully.", "success")
     return redirect(url_for("admin"))
+
+
+
+# ============================================================
+# PEACHPOS EVENT UNIT MANAGEMENT
+# ============================================================
+
+EVENT_UNIT_TYPES = {
+    "truck": "Truck",
+    "trailer": "Trailer",
+    "cart": "Cart",
+    "booth": "Booth",
+    "custom": "Custom",
+}
+
+
+def _event_unit_scope():
+    spa_id = current_spa_id()
+    workspace_id = current_business_unit_id()
+    actor_id = session.get("user_id")
+
+    if None in (spa_id, workspace_id, actor_id):
+        abort(403)
+
+    return spa_id, workspace_id, actor_id
+
+
+def _event_unit_form_values(form):
+    import re
+
+    values = {
+        "unit_name": (form.get("unit_name") or "").strip(),
+        "unit_type": (form.get("unit_type") or "").strip(),
+        "unit_identifier": (
+            form.get("unit_identifier") or ""
+        ).strip(),
+        "description": (form.get("description") or "").strip(),
+        "calendar_color": (
+            form.get("calendar_color") or ""
+        ).strip(),
+        "notes": (form.get("notes") or "").strip(),
+    }
+
+    if not 1 <= len(values["unit_name"]) <= 150:
+        raise ValueError("Unit name must be 1–150 characters.")
+
+    if values["unit_type"] not in EVENT_UNIT_TYPES:
+        raise ValueError("Select a valid Event Unit type.")
+
+    if len(values["unit_identifier"]) > 80:
+        raise ValueError("Unit identifier is too long.")
+
+    if len(values["description"]) > 2000:
+        raise ValueError("Description is too long.")
+
+    if len(values["notes"]) > 5000:
+        raise ValueError("Notes are too long.")
+
+    if not re.fullmatch(
+        r"#[0-9A-Fa-f]{6}",
+        values["calendar_color"]
+    ):
+        raise ValueError("Select a valid calendar color.")
+
+    return values
+
+
+@app.route("/event-units")
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def event_units_home():
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                event_unit_id,
+                unit_name,
+                unit_type,
+                unit_identifier,
+                calendar_color,
+                is_active
+            FROM event_units
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            ORDER BY is_active DESC, LOWER(unit_name)
+            """,
+            (spa_id, workspace_id),
+        )
+
+        keys = (
+            "event_unit_id", "unit_name", "unit_type",
+            "unit_identifier", "calendar_color", "is_active"
+        )
+
+        units = [
+            dict(zip(keys, record))
+            for record in cur.fetchall()
+        ]
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return render_template(
+        "event_units.html",
+        event_units=units,
+        event_unit_types=EVENT_UNIT_TYPES,
+        event_unit_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route("/event-units/add", methods=["GET", "POST"])
+@app.route(
+    "/event-units/<int:event_unit_id>/edit",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def event_unit_form(event_unit_id=None):
+    from psycopg2 import IntegrityError
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        existing = None
+
+        if event_unit_id is not None:
+            cur.execute(
+                """
+                SELECT
+                    unit_name,
+                    unit_type,
+                    unit_identifier,
+                    description,
+                    calendar_color,
+                    notes
+                FROM event_units
+                WHERE event_unit_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                """,
+                (event_unit_id, spa_id, workspace_id),
+            )
+
+            row = cur.fetchone()
+
+            if row is None:
+                abort(404)
+
+            fields = (
+                "unit_name", "unit_type", "unit_identifier",
+                "description", "calendar_color", "notes"
+            )
+
+            existing = dict(zip(fields, row))
+
+        values = existing or {
+            "unit_name": "",
+            "unit_type": "truck",
+            "unit_identifier": "",
+            "description": "",
+            "calendar_color": "#E87929",
+            "notes": "",
+        }
+
+        if request.method == "POST":
+            if not _security_form_csrf_valid(
+                request.form.get("security_csrf_token")
+            ):
+                abort(400)
+
+            try:
+                values = _event_unit_form_values(request.form)
+            except ValueError as exc:
+                flash(str(exc), "error")
+                values = dict(request.form)
+                return render_template(
+                    "event_unit_form.html",
+                    values=values,
+                    event_unit_id=event_unit_id,
+                    event_unit_types=EVENT_UNIT_TYPES,
+                    event_unit_csrf_token=_security_form_csrf_token(),
+                ), 400
+
+            try:
+                params = (
+                    values["unit_name"],
+                    values["unit_type"],
+                    values["unit_identifier"] or None,
+                    values["description"] or None,
+                    values["calendar_color"],
+                    values["notes"] or None,
+                )
+
+                if event_unit_id is None:
+                    cur.execute(
+                        """
+                        INSERT INTO event_units (
+                            spa_id, business_unit_id,
+                            unit_name, unit_type,
+                            unit_identifier, description,
+                            calendar_color, notes, created_by
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s
+                        )
+                        """,
+                        (
+                            spa_id, workspace_id,
+                            *params, actor_id
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE event_units
+                        SET unit_name = %s,
+                            unit_type = %s,
+                            unit_identifier = %s,
+                            description = %s,
+                            calendar_color = %s,
+                            notes = %s,
+                            updated_at = CURRENT_TIMESTAMP,
+                            updated_by = %s
+                        WHERE event_unit_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                        """,
+                        (
+                            *params,
+                            actor_id,
+                            event_unit_id,
+                            spa_id,
+                            workspace_id,
+                        ),
+                    )
+
+                    if cur.rowcount != 1:
+                        conn.rollback()
+                        abort(404)
+
+                conn.commit()
+
+            except IntegrityError as exc:
+                conn.rollback()
+
+                if getattr(exc, "pgcode", None) != "23505":
+                    raise
+
+                flash(
+                    "An Event Unit with that name already "
+                    "exists in this workspace.",
+                    "error",
+                )
+
+                return render_template(
+                    "event_unit_form.html",
+                    values=values,
+                    event_unit_id=event_unit_id,
+                    event_unit_types=EVENT_UNIT_TYPES,
+                    event_unit_csrf_token=_security_form_csrf_token(),
+                ), 409
+
+            flash("Event Unit saved successfully.", "success")
+            return redirect(url_for("event_units_home"))
+
+        return render_template(
+            "event_unit_form.html",
+            values=values,
+            event_unit_id=event_unit_id,
+            event_unit_types=EVENT_UNIT_TYPES,
+            event_unit_csrf_token=_security_form_csrf_token(),
+        )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/event-units/<int:event_unit_id>/status",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def event_unit_status(event_unit_id):
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    requested = request.form.get("status")
+
+    if requested not in {"active", "inactive"}:
+        abort(400)
+
+    active = requested == "active"
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE event_units
+            SET is_active = %s,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = %s
+            WHERE event_unit_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                active, actor_id, event_unit_id,
+                spa_id, workspace_id
+            ),
+        )
+
+        if cur.rowcount != 1:
+            conn.rollback()
+            abort(404)
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Event Unit reactivated." if active
+        else "Event Unit archived.",
+        "success",
+    )
+
+    return redirect(url_for("event_units_home"))
 
 
 @app.route("/admin")

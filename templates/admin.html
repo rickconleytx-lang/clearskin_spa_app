@@ -120,6 +120,16 @@ Cat 2
 <div class="admin-section">
     <h2>Calendar Settings</h2>
 
+    {% if "event" in calendar_available_types
+          and calendar_can_edit %}
+    <p>
+        <a class="btn" href="{{ url_for('event_units_home') }}">
+            Manage Trucks, Trailers, Carts & Booths
+        </a>
+    </p>
+    {% endif %}
+
+
     <p>
         Select the preferred calendar for your business.
         Available calendars depend on your Peach Suite Pro subscription.
