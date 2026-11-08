@@ -130103,6 +130103,88 @@ def _event_unit_form_values(form):
     return values
 
 
+
+# ==========================================================
+# EVENT CALENDAR — ADD EVENT DEVELOPMENT PREVIEW
+# ==========================================================
+
+@app.route("/events/add", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def event_new():
+
+    # Initial development preview: Business Administrators only.
+    # A dedicated event-management permission will be reviewed
+    # before employee scheduling becomes available.
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+
+    labels = {
+        slot: f"Default {slot}"
+        for slot in (1, 2, 3)
+    }
+
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+
+            cur.execute(
+                """
+                SELECT slot_number, field_label
+                FROM event_calendar_custom_labels
+                WHERE spa_id = %s
+                ORDER BY slot_number
+                """,
+                (spa_id,),
+            )
+
+            for slot, label in cur.fetchall():
+                if slot in labels:
+                    labels[slot] = label
+
+            cur.execute(
+                """
+                SELECT
+                    event_unit_id,
+                    unit_name,
+                    unit_type
+                FROM event_units
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND is_active = TRUE
+                ORDER BY LOWER(unit_name)
+                """,
+                (spa_id, workspace_id),
+            )
+
+            units = [
+                {
+                    "event_unit_id": record[0],
+                    "unit_name": record[1],
+                    "unit_type": record[2],
+                }
+                for record in cur.fetchall()
+            ]
+
+    finally:
+        conn.rollback()
+        conn.close()
+
+    return render_template(
+        "event_new.html",
+        event_custom_labels=labels,
+        available_event_units=units,
+    )
+
+
 @app.route("/event-units")
 @login_required
 @spa_required

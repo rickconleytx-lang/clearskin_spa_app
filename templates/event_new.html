@@ -1,0 +1,1072 @@
+
+{% extends "base.html" %}
+{% block title %}Add Event{% endblock %}
+
+{% block content %}
+
+<style>
+.event-draft {
+    max-width: 1050px;
+}
+.event-draft .ec-card {
+    border: 1px solid #d9dadd;
+    border-radius: 12px;
+    padding: 22px;
+    margin: 22px 0;
+}
+.event-draft .ec-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+.event-draft .ec-field {
+    min-width: 0;
+}
+.event-draft .ec-field label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 7px;
+}
+.event-draft .ec-field input,
+.event-draft .ec-field select,
+.event-draft .ec-field textarea {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+}
+.event-draft .ec-wide {
+    grid-column: 1 / -1;
+}
+.event-draft .ec-note {
+    opacity: .82;
+    font-size: .95em;
+}
+
+.event-draft .ec-field input[type="checkbox"] {
+    width: auto;
+    max-width: none;
+}
+.event-draft .ec-schedule-bulk {
+    border: 1px solid #d9dadd;
+    border-radius: 10px;
+    padding: 18px;
+    margin: 18px 0;
+}
+.event-draft .ec-day-row {
+    border: 1px solid #d9dadd;
+    border-radius: 10px;
+    padding: 18px;
+    margin: 14px 0;
+}
+.event-draft .ec-day-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.event-draft .ec-day-heading h3 {
+    margin: 0;
+}
+.event-draft .ec-day-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px;
+    margin-top: 16px;
+}
+.event-draft .ec-checkline {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-weight: 500;
+}
+.event-draft .ec-checkline input {
+    width: auto;
+    max-width: none;
+}
+.event-draft .ec-day-status {
+    margin: 14px 0 0;
+    font-size: .92em;
+}
+.event-draft .ec-day-status.is-invalid {
+    color: #a32424;
+    font-weight: 600;
+}
+.event-draft .ec-day-row.is-closed .ec-day-fields {
+    opacity: .55;
+}
+
+
+.event-draft .ec-equipment-bulk,
+.event-draft .ec-equipment-day {
+    border: 1px solid #d9dadd;
+    border-radius: 10px;
+    padding: 18px;
+    margin: 15px 0;
+}
+.event-draft .ec-equipment-choices {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin: 15px 0;
+}
+.event-draft .ec-equipment-choice {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 12px;
+    border: 1px solid #d9dadd;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: normal;
+}
+.event-draft .ec-equipment-choice input {
+    width: auto;
+    flex-shrink: 0;
+}
+.event-draft .ec-equipment-choice span {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.event-draft .ec-equipment-choice small {
+    opacity: .75;
+}
+.event-draft .ec-equipment-day h4 {
+    margin: 0 0 8px;
+}
+.event-draft .ec-equipment-day.is-closed {
+    opacity: .65;
+}
+@media (max-width: 650px) {
+    .event-draft .ec-equipment-choices {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 650px) {
+    .event-draft .ec-grid {
+        grid-template-columns: 1fr;
+    }
+    .event-draft .ec-card {
+        padding: 15px;
+    }
+}
+</style>
+
+<div class="event-draft">
+
+    <h1>Add Event</h1>
+
+    <p>
+        <a href="{{ url_for('admin') }}">Back to Calendar Settings</a>
+    </p>
+
+    <p>
+        Set up the event, operating dates, venue, equipment,
+        employee shifts, and additional information.
+    </p>
+
+    <p class="ec-note">
+        <strong>Development preview:</strong>
+        This page does not save information yet.
+        Please do not enter real event details until
+        the Save Event workflow is enabled.
+    </p>
+
+    <section class="ec-card">
+        <h2>Event Information</h2>
+
+        <div class="ec-grid">
+            <div class="ec-field ec-wide">
+                <label for="event_name">Event Name</label>
+                <input id="event_name" maxlength="200"
+                       placeholder="Example: Roanoke Days">
+            </div>
+
+            <div class="ec-field">
+                <label for="start_date">Start Date</label>
+                <input type="date" id="start_date">
+            </div>
+
+            <div class="ec-field">
+                <label for="end_date">End Date</label>
+                <input type="date" id="end_date">
+            </div>
+
+            <div class="ec-field">
+                <label for="event_status">Event Status</label>
+                <select id="event_status">
+                    <option>Scheduled</option>
+                    <option>Confirmed</option>
+                    <option>Cancelled</option>
+                    <option>Completed</option>
+                </select>
+            </div>
+
+            <div class="ec-field">
+                <label>Visibility</label>
+                <label>
+                    <input type="checkbox">
+                    Public Event
+                </label>
+                <p class="ec-note">
+                    Public events may later appear on PeachWeb.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="ec-card">
+        <h2>Venue & Location</h2>
+
+        <div class="ec-grid">
+            <div class="ec-field ec-wide">
+                <label for="venue_name">Venue / Location Name</label>
+                <input id="venue_name" maxlength="200">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="street_address">Street Address</label>
+                <input id="street_address" maxlength="255">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="address_line2">Address Line 2</label>
+                <input id="address_line2" maxlength="255">
+            </div>
+
+            <div class="ec-field">
+                <label for="city">City</label>
+                <input id="city" maxlength="120">
+            </div>
+
+            <div class="ec-field">
+                <label for="county">County</label>
+                <input id="county" maxlength="120">
+            </div>
+
+            <div class="ec-field">
+                <label for="state">State</label>
+                <input id="state" maxlength="80">
+            </div>
+
+            <div class="ec-field">
+                <label for="zip_code">ZIP Code</label>
+                <input id="zip_code" maxlength="20">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="parking_setup_location">
+                    Parking Pad / Setup Location
+                </label>
+                <textarea id="parking_setup_location" rows="3"
+                    placeholder="Where should the truck or cart be positioned?"></textarea>
+            </div>
+        </div>
+    </section>
+
+    <section class="ec-card">
+        <h2>Event Contact & Permits</h2>
+
+        <div class="ec-grid">
+            <div class="ec-field">
+                <label for="contact_name">Contact Name</label>
+                <input id="contact_name" maxlength="150">
+            </div>
+
+            <div class="ec-field">
+                <label for="contact_phone">Contact Phone</label>
+                <input id="contact_phone" type="tel" maxlength="40">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="contact_email">Contact Email</label>
+                <input id="contact_email" type="email" maxlength="254">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label>
+                    <input type="checkbox">
+                    Required Permits Obtained
+                </label>
+            </div>
+        </div>
+    </section>
+
+    <section class="ec-card">
+        <h2>Event Custom Fields</h2>
+
+        <p class="ec-note">
+            These labels come from your business's Admin Settings.
+        </p>
+
+        <div class="ec-grid">
+            {% for slot in (1, 2, 3) %}
+            <div class="ec-field">
+                <label for="custom_{{ slot }}">
+                    {{ event_custom_labels[slot] }}
+                </label>
+                <input id="custom_{{ slot }}" type="text">
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+
+    <section class="ec-card">
+        <h2>Daily Operating Schedule</h2>
+
+        <p>
+            Choose your event's start and end dates above.
+            A separate operating schedule will be created
+            automatically for each date.
+        </p>
+
+        <div class="ec-schedule-bulk">
+            <h3>Apply the Same Hours</h3>
+
+            <p class="ec-note">
+                Set your usual hours below, then apply them
+                to every operating day. You can still adjust
+                individual dates afterward.
+            </p>
+
+            <div class="ec-grid">
+                <div class="ec-field">
+                    <label for="ec_default_open">
+                        Opening Time
+                    </label>
+                    <input id="ec_default_open"
+                           type="time" value="10:00">
+                </div>
+
+                <div class="ec-field">
+                    <label for="ec_default_close">
+                        Closing Time
+                    </label>
+                    <input id="ec_default_close"
+                           type="time" value="18:00">
+                </div>
+
+                <div class="ec-field">
+                    <label for="ec_default_setup">
+                        Setup / Arrival (optional)
+                    </label>
+                    <input id="ec_default_setup" type="time">
+                </div>
+
+                <div class="ec-field">
+                    <label for="ec_default_breakdown">
+                        Breakdown (optional)
+                    </label>
+                    <input id="ec_default_breakdown"
+                           type="time">
+                </div>
+
+                <div class="ec-field ec-wide">
+                    <label class="ec-checkline">
+                        <input id="ec_default_overnight"
+                               type="checkbox">
+                        Closes Next Day (overnight)
+                    </label>
+                </div>
+            </div>
+
+            <p>
+                <button type="button"
+                        class="btn"
+                        id="ec_apply_hours">
+                    Apply Hours to Every Operating Day
+                </button>
+            </p>
+        </div>
+
+        <h3 style="color: #B42318;">Individual Event Days</h3>
+
+        <p id="ec_schedule_message"
+           class="ec-note"
+           role="status"
+           aria-live="polite">
+            Select the event start and end dates above.
+        </p>
+
+        <div id="ec_schedule_days"></div>
+
+        <p class="ec-note">
+            Overnight closing means the closing time occurs
+            on the following calendar day. Time-zone and
+            daylight-saving validation will be performed
+            when event saving is implemented.
+        </p>
+
+        <p class="ec-note">
+            Development preview only. Daily hours entered here
+            are not saved to the database yet.
+        </p>
+    </section>
+
+    <section class="ec-card">
+        <h2>Trucks, Trailers, Carts & Booths</h2>
+
+        <p>
+            Assign one or more available units to each
+            operating day.
+        </p>
+
+        {% if available_event_units %}
+
+        <div class="ec-equipment-bulk">
+            <h3>Apply Equipment to Multiple Days</h3>
+
+            <p class="ec-note">
+                Select equipment below, then apply it to
+                every operating day. Individual dates can
+                be adjusted afterward.
+            </p>
+
+            <div class="ec-equipment-choices"
+                 id="ec_equipment_bulk_choices">
+                {% for unit in available_event_units %}
+                <label class="ec-equipment-choice">
+                    <input type="checkbox"
+                           data-event-unit-id="{{ unit.event_unit_id }}">
+                    <span>
+                        <strong>{{ unit.unit_name }}</strong>
+                        <small>{{ unit.unit_type|title }}</small>
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+
+            <p>
+                <button type="button"
+                        class="btn"
+                        id="ec_apply_equipment">
+                    Apply Selected Equipment to All Operating Days
+                </button>
+            </p>
+        </div>
+
+        {% else %}
+
+        <p>
+            No active equipment is registered in this workspace.
+            Add equipment before scheduling units for events.
+        </p>
+
+        {% endif %}
+
+        <h3>Equipment by Event Day</h3>
+
+        <p id="ec_equipment_message"
+           class="ec-note"
+           role="status"
+           aria-live="polite">
+            Select event dates to assign equipment.
+        </p>
+
+        <div id="ec_equipment_days"></div>
+
+        <template id="ec_equipment_choice_template">
+            <div class="ec-equipment-choices">
+                {% for unit in available_event_units %}
+                <label class="ec-equipment-choice">
+                    <input type="checkbox"
+                           data-event-unit-id="{{ unit.event_unit_id }}">
+                    <span>
+                        <strong>{{ unit.unit_name }}</strong>
+                        <small>{{ unit.unit_type|title }}</small>
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+        </template>
+
+        <p class="ec-note">
+            Equipment selections are a development preview.
+            Existing reservations and time conflicts will
+            be validated by the server when saving is enabled.
+        </p>
+    </section>
+
+    <section class="ec-card">
+        <h2>Employee Scheduling</h2>
+        <p>
+            We'll select employees from existing
+            Peach Suite Pro Employee Management records.
+        </p>
+        <p class="ec-note">
+            Shift assignments, active workspace membership
+            checks, and conflict protection will be connected
+            in the scheduling stage. No automatic payroll records.
+        </p>
+    </section>
+
+    <section class="ec-card">
+        <h2>Descriptions & Notes</h2>
+
+        <div class="ec-grid">
+            <div class="ec-field ec-wide">
+                <label for="public_description">
+                    Public Event Description
+                </label>
+                <textarea id="public_description" rows="3"></textarea>
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="notes_1">Notes 1 — Setup & Logistics</label>
+                <textarea id="notes_1" rows="3"></textarea>
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="notes_2">Notes 2 — Internal Team Notes</label>
+                <textarea id="notes_2" rows="3"></textarea>
+            </div>
+        </div>
+    </section>
+
+    <p class="ec-note">
+        Save Event will be enabled after the complete
+        server-side validation and scheduling transactions
+        have been implemented and tested.
+    </p>
+
+    <button class="btn" type="button" disabled>
+        Save Event — Not Yet Enabled
+    </button>
+
+
+<script>
+(function () {
+    "use strict";
+
+    const startInput = document.getElementById("start_date");
+    const endInput = document.getElementById("end_date");
+    const daysContainer = document.getElementById("ec_schedule_days");
+    const message = document.getElementById("ec_schedule_message");
+
+    const bulkOpen = document.getElementById("ec_default_open");
+    const bulkClose = document.getElementById("ec_default_close");
+    const bulkSetup = document.getElementById("ec_default_setup");
+    const bulkBreakdown =
+        document.getElementById("ec_default_breakdown");
+    const bulkOvernight =
+        document.getElementById("ec_default_overnight");
+    const applyButton = document.getElementById("ec_apply_hours");
+
+    if (!startInput || !endInput || !daysContainer ||
+        !message || !applyButton) {
+        return;
+    }
+
+    const equipmentDays =
+        document.getElementById("ec_equipment_days");
+    const equipmentMessage =
+        document.getElementById("ec_equipment_message");
+    const equipmentTemplate =
+        document.getElementById("ec_equipment_choice_template");
+    const applyEquipment =
+        document.getElementById("ec_apply_equipment");
+    const bulkEquipment =
+        document.getElementById("ec_equipment_bulk_choices");
+
+    const dailyValues = new Map();
+    const DAY_MS = 86400000;
+    const MAX_PREVIEW_DAYS = 366;
+
+    const dateFormatter = new Intl.DateTimeFormat(undefined, {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC"
+    });
+
+    function parseDate(value) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+            return null;
+        }
+
+        const date = new Date(value + "T00:00:00Z");
+
+        if (
+            Number.isNaN(date.getTime()) ||
+            date.toISOString().slice(0, 10) !== value
+        ) {
+            return null;
+        }
+
+        return date;
+    }
+
+    function timeMinutes(value) {
+        if (!/^\d{2}:\d{2}$/.test(value)) {
+            return null;
+        }
+
+        const parts = value.split(":").map(Number);
+
+        if (
+            parts[0] > 23 ||
+            parts[1] > 59
+        ) {
+            return null;
+        }
+
+        return parts[0] * 60 + parts[1];
+    }
+
+    function bulkValues() {
+        return {
+            open: bulkOpen.value,
+            close: bulkClose.value,
+            setup: bulkSetup.value,
+            breakdown: bulkBreakdown.value,
+            overnight: bulkOvernight.checked
+        };
+    }
+
+    function newDayValues() {
+        return Object.assign({
+            operating: true,
+            notes: "",
+            equipmentIds: []
+        }, bulkValues());
+    }
+
+    function makeTimeField(dateKey, fieldKey, labelText, value) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "ec-field";
+
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+
+        const id = "ec_" + fieldKey + "_" + dateKey;
+
+        label.htmlFor = id;
+        label.textContent = labelText;
+
+        input.type = "time";
+        input.id = id;
+        input.value = value || "";
+        input.dataset.field = fieldKey;
+
+        wrapper.append(label, input);
+        return wrapper;
+    }
+
+    function makeCheckbox(fieldKey, labelText, checked) {
+        const label = document.createElement("label");
+        label.className = "ec-checkline";
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.dataset.field = fieldKey;
+        input.checked = Boolean(checked);
+
+        const text = document.createElement("span");
+        text.textContent = labelText;
+
+        label.append(input, text);
+        return label;
+    }
+
+    function updateStatus(row, values) {
+        const status = row.querySelector(".ec-day-status");
+        status.classList.remove("is-invalid");
+
+        if (!values.operating) {
+            status.textContent = "No operation scheduled on this date.";
+            return;
+        }
+
+        const open = timeMinutes(values.open);
+        const close = timeMinutes(values.close);
+
+        if (open === null || close === null) {
+            status.textContent = "Enter opening and closing times.";
+            status.classList.add("is-invalid");
+            return;
+        }
+
+        const closingMinute =
+            close + (values.overnight ? 1440 : 0);
+
+        const duration = closingMinute - open;
+
+        if (duration <= 0) {
+            status.textContent =
+                "Closing must be after opening. " +
+                "Select 'Closes Next Day' for overnight hours.";
+            status.classList.add("is-invalid");
+            return;
+        }
+
+        if (duration > 1440) {
+            status.textContent =
+                "This schedule exceeds 24 hours. Please review " +
+                "the opening, closing, and overnight settings.";
+            status.classList.add("is-invalid");
+            return;
+        }
+
+        const hours = Math.floor(duration / 60);
+        const minutes = duration % 60;
+
+        status.textContent =
+            "Operating duration: " +
+            hours + " hr" +
+            (minutes ? " " + minutes + " min" : "") +
+            (values.overnight ? " (closes next day)" : "") +
+            ".";
+    }
+
+    function createDayRow(date, dateKey, values) {
+        const row = document.createElement("div");
+        row.className = "ec-day-row";
+        row.dataset.date = dateKey;
+
+        const heading = document.createElement("div");
+        heading.className = "ec-day-heading";
+
+        const title = document.createElement("h3");
+        title.textContent = dateFormatter.format(date);
+
+        heading.append(
+            title,
+            makeCheckbox(
+                "operating",
+                "Operating This Day",
+                values.operating
+            )
+        );
+
+        const fields = document.createElement("div");
+        fields.className = "ec-day-fields";
+
+        fields.append(
+            makeTimeField(
+                dateKey, "open", "Opening Time", values.open
+            ),
+            makeTimeField(
+                dateKey, "close", "Closing Time", values.close
+            ),
+            makeTimeField(
+                dateKey, "setup",
+                "Setup / Arrival (optional)",
+                values.setup
+            ),
+            makeTimeField(
+                dateKey, "breakdown",
+                "Breakdown (optional)",
+                values.breakdown
+            )
+        );
+
+        const overnightWrap = document.createElement("div");
+        overnightWrap.className = "ec-wide";
+
+        overnightWrap.append(
+            makeCheckbox(
+                "overnight",
+                "Closes Next Day (overnight)",
+                values.overnight
+            )
+        );
+
+        fields.append(overnightWrap);
+
+        const notesWrap = document.createElement("div");
+        notesWrap.className = "ec-field ec-wide";
+
+        const notesLabel = document.createElement("label");
+        notesLabel.textContent = "Daily Notes (optional)";
+        notesLabel.htmlFor = "ec_notes_" + dateKey;
+
+        const notes = document.createElement("textarea");
+        notes.id = notesLabel.htmlFor;
+        notes.rows = 2;
+        notes.dataset.field = "notes";
+        notes.value = values.notes || "";
+
+        notesWrap.append(notesLabel, notes);
+        fields.append(notesWrap);
+
+        const status = document.createElement("p");
+        status.className = "ec-day-status";
+        status.setAttribute("aria-live", "polite");
+
+        row.append(heading, fields, status);
+
+        row.classList.toggle("is-closed", !values.operating);
+
+        fields.querySelectorAll("input, textarea").forEach(
+            function (control) {
+                control.disabled = !values.operating;
+            }
+        );
+
+        updateStatus(row, values);
+
+        return row;
+    }
+
+
+    function renderEquipmentDays() {
+        equipmentDays.replaceChildren();
+
+        const visibleDays =
+            daysContainer.querySelectorAll(".ec-day-row");
+
+        if (!visibleDays.length) {
+            equipmentMessage.textContent =
+                "Choose valid event dates above to assign equipment.";
+            return;
+        }
+
+        const hasEquipment = equipmentTemplate.content
+            .querySelector("input[data-event-unit-id]");
+
+        if (!hasEquipment) {
+            equipmentMessage.textContent =
+                "No active equipment is available for assignment.";
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        for (const dayRow of visibleDays) {
+            const dateKey = dayRow.dataset.date;
+            const values = dailyValues.get(dateKey);
+
+            if (!values) continue;
+
+            const card = document.createElement("div");
+            card.className = "ec-equipment-day";
+            card.dataset.date = dateKey;
+            card.classList.toggle(
+                "is-closed", !values.operating
+            );
+
+            const heading = document.createElement("h4");
+            heading.textContent = dateFormatter.format(
+                new Date(dateKey + "T00:00:00Z")
+            );
+
+            card.append(heading);
+
+            if (!values.operating) {
+                const note = document.createElement("p");
+                note.className = "ec-note";
+                note.textContent =
+                    "Non-operating day — no equipment scheduled.";
+                card.append(note);
+            } else {
+                const choices =
+                    equipmentTemplate.content.cloneNode(true);
+
+                choices.querySelectorAll(
+                    "input[data-event-unit-id]"
+                ).forEach(function (input) {
+                    input.checked = values.equipmentIds.includes(
+                        input.dataset.eventUnitId
+                    );
+                });
+
+                card.append(choices);
+            }
+
+            fragment.append(card);
+        }
+
+        equipmentDays.append(fragment);
+
+        equipmentMessage.textContent =
+            "Select equipment for individual operating days, " +
+            "or apply a common selection above.";
+    }
+
+    function renderDays() {
+        daysContainer.replaceChildren();
+        equipmentDays.replaceChildren();
+        equipmentMessage.textContent =
+            "Choose valid event dates above to assign equipment.";
+
+        const start = parseDate(startInput.value);
+        const end = parseDate(endInput.value);
+
+        if (!start || !end) {
+            message.textContent =
+                "Select both the start and end dates to " +
+                "generate the operating schedule.";
+            return;
+        }
+
+        const count =
+            Math.round(
+                (end.getTime() - start.getTime()) / DAY_MS
+            ) + 1;
+
+        if (count <= 0) {
+            message.textContent =
+                "End Date must be the same as or later " +
+                "than Start Date.";
+            return;
+        }
+
+        if (count > MAX_PREVIEW_DAYS) {
+            message.textContent =
+                "This preview supports up to 366 calendar days. " +
+                "Choose a shorter range for now.";
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        for (let i = 0; i < count; i++) {
+            const day = new Date(start.getTime() + i * DAY_MS);
+            const key = day.toISOString().slice(0, 10);
+
+            if (!dailyValues.has(key)) {
+                dailyValues.set(key, newDayValues());
+            }
+
+            fragment.append(
+                createDayRow(day, key, dailyValues.get(key))
+            );
+        }
+
+        daysContainer.append(fragment);
+
+        message.textContent =
+            count + " event day" +
+            (count === 1 ? "" : "s") +
+            " generated. Customize each date as needed.";
+
+        renderEquipmentDays();
+    }
+
+    function updateDayFromInput(event) {
+        const input = event.target;
+        const row = input.closest(".ec-day-row");
+
+        if (!row || !input.dataset.field) {
+            return;
+        }
+
+        const values = dailyValues.get(row.dataset.date);
+
+        if (!values) {
+            return;
+        }
+
+        const field = input.dataset.field;
+
+        values[field] =
+            input.type === "checkbox"
+                ? input.checked
+                : input.value;
+
+        if (field === "operating") {
+            row.classList.toggle("is-closed", !values.operating);
+
+            row.querySelectorAll(
+                ".ec-day-fields input, .ec-day-fields textarea"
+            ).forEach(function (control) {
+                control.disabled = !values.operating;
+            });
+        }
+
+        updateStatus(row, values);
+
+        if (field === "operating") {
+            renderEquipmentDays();
+        }
+    }
+
+    equipmentDays.addEventListener("change", function (event) {
+        const input = event.target;
+        const card = input.closest(".ec-equipment-day");
+
+        if (
+            !card ||
+            !input.matches("input[data-event-unit-id]")
+        ) {
+            return;
+        }
+
+        const values = dailyValues.get(card.dataset.date);
+
+        if (!values || !values.operating) {
+            return;
+        }
+
+        const unitId = input.dataset.eventUnitId;
+        const selected = new Set(values.equipmentIds);
+
+        if (input.checked) {
+            selected.add(unitId);
+        } else {
+            selected.delete(unitId);
+        }
+
+        values.equipmentIds = Array.from(selected);
+    });
+
+    if (applyEquipment && bulkEquipment) {
+        applyEquipment.addEventListener("click", function () {
+            const selected = Array.from(
+                bulkEquipment.querySelectorAll(
+                    "input[data-event-unit-id]:checked"
+                ),
+                input => input.dataset.eventUnitId
+            );
+
+            for (const row of daysContainer.querySelectorAll(
+                ".ec-day-row"
+            )) {
+                const values = dailyValues.get(row.dataset.date);
+
+                if (values && values.operating) {
+                    values.equipmentIds = selected.slice();
+                }
+            }
+
+            renderEquipmentDays();
+        });
+    }
+
+    startInput.addEventListener("change", renderDays);
+    endInput.addEventListener("change", renderDays);
+
+    daysContainer.addEventListener(
+        "input", updateDayFromInput
+    );
+    daysContainer.addEventListener(
+        "change", updateDayFromInput
+    );
+
+    applyButton.addEventListener("click", function () {
+        const defaults = bulkValues();
+
+        for (
+            const row of daysContainer.querySelectorAll(".ec-day-row")
+        ) {
+            const values = dailyValues.get(row.dataset.date);
+
+            if (values && values.operating) {
+                Object.assign(values, defaults);
+            }
+        }
+
+        renderDays();
+    });
+
+    renderDays();
+})();
+</script>
+
+</div>
+
+{% endblock %}
