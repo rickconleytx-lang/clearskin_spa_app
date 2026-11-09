@@ -130128,6 +130128,14 @@ def validate_event_draft():
     from services.event_calendar_coverage import (
         analyze_event_coverage,
     )
+    from services.event_calendar_resources import (
+        EventResourceError,
+        validate_event_resource_ownership,
+    )
+    from services.event_calendar_availability import (
+        EventAvailabilityError,
+        validate_existing_event_availability,
+    )
 
     # Event scheduling remains Business Administrator only.
     if (
@@ -130165,7 +130173,7 @@ def validate_event_draft():
             "error": "Invalid event data format.",
         }), 400
 
-    spa_id, _workspace_id, _actor_id = _event_unit_scope()
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
 
     conn = get_db_connection()
 
@@ -130207,6 +130215,45 @@ def validate_event_draft():
             "error": str(exc),
         }), 422
 
+    # Read-only database preflight.
+    # Revalidate inside the future save transaction.
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+
+            try:
+                ownership = validate_event_resource_ownership(
+                    cur,
+                    normalized,
+                    spa_id,
+                    workspace_id,
+                )
+            except EventResourceError as exc:
+                return jsonify({
+                    "ok": False,
+                    "ready_to_save": False,
+                    "error": str(exc),
+                }), 422
+
+            try:
+                availability = validate_existing_event_availability(
+                    cur,
+                    normalized,
+                    spa_id,
+                )
+            except EventAvailabilityError as exc:
+                return jsonify({
+                    "ok": False,
+                    "ready_to_save": False,
+                    "error": str(exc),
+                }), 409
+
+    finally:
+        conn.rollback()
+        conn.close()
+
     days = normalized["days"]
     active_days = [
         day for day in days if day["operating"]
@@ -130217,13 +130264,15 @@ def validate_event_draft():
     return jsonify({
         "ok": True,
         "ready_to_save": False,
-        "validation_level": "structure_and_time_only",
+        "validation_level": "database_preflight",
         "message": (
-            "Event structure and times passed validation. "
-            "Employee eligibility, equipment ownership, "
-            "and existing-event conflicts are not yet "
-            "verified. Nothing was saved."
+            "Event structure, resource eligibility, and "
+            "existing reservations passed database preflight. "
+            "Nothing was saved. Availability must be "
+            "rechecked during the final save transaction."
         ),
+        "ownership_validated": ownership["ownership_validated"],
+        "availability_validated": availability["availability_validated"],
         "calendar_days": len(days),
         "operating_days": len(active_days),
         "equipment_assignments": sum(

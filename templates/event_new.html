@@ -671,8 +671,9 @@
 
         <p class="ec-note">
             Shift editing is available in this development
-            preview. Database conflict checks will be
-            connected before event saving is enabled.
+            preview. Use Review Captured Event Data to check
+            equipment and employee conflicts. Availability
+            will be rechecked when saving is enabled.
         </p>
 
         <p class="ec-note">
@@ -1256,8 +1257,8 @@
         } else {
             employeeMessage.textContent =
                 "No overlapping employee shifts detected " +
-                "within this event preview. Existing events " +
-                "have not been checked yet.";
+                "within this event preview. Existing-event " +
+                "reservations are checked when you review the event.";
         }
     }
 
@@ -2055,8 +2056,10 @@
                         response.ok &&
                         result.ok === true &&
                         result.ready_to_save === false &&
+                        result.ownership_validated === true &&
+                        result.availability_validated === true &&
                         result.validation_level ===
-                            "structure_and_time_only"
+                            "database_preflight"
                     ) {
                         renderStaffingWarnings(result);
                         coverageAutoEnabled = true;
@@ -2070,10 +2073,11 @@
                             " equipment assignment(s), and " +
                             result.employee_shifts +
                             " employee shift(s). " +
-                            "Existing-event availability, " +
-                            "equipment ownership, and employee " +
-                            "eligibility have NOT been checked. " +
-                            "Nothing was saved.";
+                            "Equipment ownership, employee " +
+                            "eligibility, and existing reservations " +
+                            "passed database preflight. " +
+                            "Nothing was saved. Availability will " +
+                            "be rechecked during saving.";
                     } else {
                         const reason =
                             typeof result.error === "string"
