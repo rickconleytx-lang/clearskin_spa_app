@@ -195,6 +195,11 @@
     border-color: #B42318;
     border-left: 4px solid #B42318;
 }
+
+.event-draft .ec-validation-error {
+    color: #B42318;
+    font-weight: 600;
+}
 </style>
 
 <div class="event-draft">
@@ -250,7 +255,7 @@
             <div class="ec-field">
                 <label>Visibility</label>
                 <label>
-                    <input type="checkbox">
+                    <input type="checkbox" id="include_on_peachweb">
                     Include on PeachWeb
                 </label>
                 <p class="ec-note">
@@ -330,7 +335,7 @@
 
             <div class="ec-field ec-wide">
                 <label>
-                    <input type="checkbox">
+                    <input type="checkbox" id="permits_obtained">
                     Required Permits Obtained
                 </label>
             </div>
@@ -688,9 +693,37 @@
         have been implemented and tested.
     </p>
 
-    <button class="btn" type="button" disabled>
-        Save Event — Not Yet Enabled
-    </button>
+    <form id="ec_event_transport"
+          method="POST"
+          action="{{ url_for('event_new') }}">
+
+        <input type="hidden"
+               name="security_csrf_token"
+               value="{{ event_csrf_token }}">
+
+        <input type="hidden"
+               id="ec_event_payload"
+               name="event_payload">
+
+        <button class="btn" type="button" disabled>
+            Save Event — Not Yet Enabled
+        </button>
+    </form>
+
+    <p style="margin-top:15px;">
+        <button type="button"
+                class="btn"
+                id="ec_preview_payload">
+            Review Captured Event Data
+        </button>
+    </p>
+
+    <p id="ec_payload_summary"
+       class="ec-note"
+       role="status"
+       aria-live="polite">
+        Development review only. Nothing will be saved.
+    </p>
 
 
 <script>
@@ -1581,6 +1614,238 @@
 
         renderDays();
     });
+
+
+    const transport =
+        document.getElementById("ec_event_transport");
+    const payloadInput =
+        document.getElementById("ec_event_payload");
+    const previewButton =
+        document.getElementById("ec_preview_payload");
+    const payloadSummary =
+        document.getElementById("ec_payload_summary");
+
+    function fieldValue(id) {
+        const field = document.getElementById(id);
+        return field ? field.value : "";
+    }
+
+    function fieldChecked(id) {
+        const field = document.getElementById(id);
+        return Boolean(field && field.checked);
+    }
+
+    function collectEventPayload() {
+        const days = Array.from(
+            daysContainer.querySelectorAll(".ec-day-row"),
+            function (row) {
+                const dateKey = row.dataset.date;
+                const state = dailyValues.get(dateKey);
+
+                if (!state) return null;
+
+                const operating = Boolean(state.operating);
+
+                return {
+                    date: dateKey,
+                    operating: operating,
+                    opens: operating ? state.open : null,
+                    closes: operating ? state.close : null,
+                    closes_next_day:
+                        operating && Boolean(state.overnight),
+                    setup: operating ? state.setup : null,
+                    breakdown: operating ? state.breakdown : null,
+                    notes: operating ? state.notes : "",
+                    equipment_ids: operating
+                        ? state.equipmentIds.slice()
+                        : [],
+                    shifts: operating
+                        ? state.shifts.map(function (shift) {
+                            return {
+                                employee_id: shift.employeeId,
+                                starts: shift.start,
+                                ends: shift.end,
+                                ends_next_day:
+                                    Boolean(shift.overnight),
+                                equipment_id: shift.unitId,
+                                role: shift.role,
+                                notes: shift.notes
+                            };
+                        })
+                        : []
+                };
+            }
+        ).filter(Boolean);
+
+        return {
+            event: {
+                name: fieldValue("event_name"),
+                start_date: fieldValue("start_date"),
+                end_date: fieldValue("end_date"),
+                status: fieldValue("event_status").toLowerCase(),
+                include_on_peachweb:
+                    fieldChecked("include_on_peachweb"),
+                venue_name: fieldValue("venue_name"),
+                street_address: fieldValue("street_address"),
+                address_line2: fieldValue("address_line2"),
+                city: fieldValue("city"),
+                county: fieldValue("county"),
+                state: fieldValue("state"),
+                zip_code: fieldValue("zip_code"),
+                parking_setup_location:
+                    fieldValue("parking_setup_location"),
+                contact_name: fieldValue("contact_name"),
+                contact_phone: fieldValue("contact_phone"),
+                contact_email: fieldValue("contact_email"),
+                permits_obtained:
+                    fieldChecked("permits_obtained"),
+                public_description:
+                    fieldValue("public_description"),
+                notes_1: fieldValue("notes_1"),
+                notes_2: fieldValue("notes_2")
+            },
+            custom_values: {
+                "1": fieldValue("custom_1"),
+                "2": fieldValue("custom_2"),
+                "3": fieldValue("custom_3")
+            },
+            days: days
+        };
+    }
+
+    if (transport) {
+        // Do not permit POST until the secure Save Event
+        // backend is implemented and tested.
+        transport.addEventListener("submit", function (event) {
+            event.preventDefault();
+        });
+    }
+
+
+    if (previewButton && payloadInput &&
+        payloadSummary && transport) {
+
+        previewButton.addEventListener(
+            "click",
+            async function () {
+
+                const payload = collectEventPayload();
+
+                payloadSummary.classList.remove(
+                    "ec-validation-error"
+                );
+
+                if (!payload.days.length) {
+                    payloadSummary.textContent =
+                        "Select a valid event date range first.";
+                    payloadSummary.classList.add(
+                        "ec-validation-error"
+                    );
+                    payloadInput.value = "";
+                    return;
+                }
+
+                const serialized = JSON.stringify(payload);
+
+                if (serialized.length > 500000) {
+                    payloadSummary.textContent =
+                        "The event data is too large.";
+                    payloadSummary.classList.add(
+                        "ec-validation-error"
+                    );
+                    payloadInput.value = "";
+                    return;
+                }
+
+                payloadInput.value = serialized;
+                previewButton.disabled = true;
+
+                payloadSummary.textContent =
+                    "Checking event information and times " +
+                    "with the Local server...";
+
+                try {
+                    const response = await fetch(
+                        "{{ url_for('validate_event_draft') }}",
+                        {
+                            method: "POST",
+                            credentials: "same-origin",
+                            headers: {
+                                "Accept": "application/json"
+                            },
+                            body: new FormData(transport)
+                        }
+                    );
+
+                    if (!response.headers.get("content-type")
+                        ?.includes("application/json")) {
+                        throw new Error(
+                            "Server returned HTTP " +
+                            response.status +
+                            " without a JSON response."
+                        );
+                    }
+
+                    const result = await response.json();
+
+                    if (
+                        response.ok &&
+                        result.ok === true &&
+                        result.ready_to_save === false &&
+                        result.validation_level ===
+                            "structure_and_time_only"
+                    ) {
+                        payloadSummary.textContent =
+                            "SERVER VALIDATION PASSED — " +
+                            result.calendar_days +
+                            " calendar day(s), " +
+                            result.operating_days +
+                            " operating day(s), " +
+                            result.equipment_assignments +
+                            " equipment assignment(s), and " +
+                            result.employee_shifts +
+                            " employee shift(s). " +
+                            "Existing-event availability, " +
+                            "equipment ownership, and employee " +
+                            "eligibility have NOT been checked. " +
+                            "Nothing was saved.";
+                    } else {
+                        const reason =
+                            typeof result.error === "string"
+                                ? result.error
+                                : "HTTP " + response.status;
+
+                        payloadSummary.textContent =
+                            "SERVER VALIDATION FAILED — " +
+                            reason +
+                            " Nothing was saved.";
+
+                        payloadSummary.classList.add(
+                            "ec-validation-error"
+                        );
+                    }
+
+                } catch (error) {
+                    payloadSummary.textContent =
+                        "SERVER VALIDATION UNAVAILABLE — " +
+                        "Check the Local Flask server and " +
+                        "your login session. Nothing was saved.";
+
+                    payloadSummary.classList.add(
+                        "ec-validation-error"
+                    );
+
+                    console.warn(
+                        "Event draft validation unavailable:",
+                        error.message
+                    );
+
+                } finally {
+                    previewButton.disabled = false;
+                }
+            }
+        );
+    }
 
     renderDays();
 })();

@@ -130108,6 +130108,130 @@ def _event_unit_form_values(form):
 # EVENT CALENDAR — ADD EVENT DEVELOPMENT PREVIEW
 # ==========================================================
 
+
+# ==========================================================
+# EVENT CALENDAR — VALIDATE DRAFT (NO DATABASE WRITES)
+# ==========================================================
+
+@app.route("/events/validate", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def validate_event_draft():
+    import json
+    from flask import jsonify
+    from services.event_calendar_validation import (
+        EventValidationError,
+        validate_event_payload,
+    )
+
+    # Event scheduling remains Business Administrator only.
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        request.content_length is None
+        or request.content_length > 600000
+    ):
+        abort(413)
+
+    raw_payload = request.form.get("event_payload", "")
+
+    if not raw_payload or len(raw_payload) > 500000:
+        return jsonify({
+            "ok": False,
+            "ready_to_save": False,
+            "error": "Missing or oversized event data.",
+        }), 400
+
+    try:
+        payload = json.loads(raw_payload)
+    except (ValueError, TypeError, RecursionError):
+        return jsonify({
+            "ok": False,
+            "ready_to_save": False,
+            "error": "Invalid event data format.",
+        }), 400
+
+    spa_id, _workspace_id, _actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+
+            cur.execute(
+                """
+                SELECT timezone_name
+                FROM spas
+                WHERE spa_id = %s
+                """,
+                (spa_id,),
+            )
+
+            row = cur.fetchone()
+            timezone_name = row[0] if row else None
+
+    finally:
+        conn.rollback()
+        conn.close()
+
+    if not timezone_name:
+        return jsonify({
+            "ok": False,
+            "ready_to_save": False,
+            "error": "Business time zone is not configured.",
+        }), 422
+
+    try:
+        normalized = validate_event_payload(
+            payload, timezone_name
+        )
+    except EventValidationError as exc:
+        return jsonify({
+            "ok": False,
+            "ready_to_save": False,
+            "error": str(exc),
+        }), 422
+
+    days = normalized["days"]
+    active_days = [
+        day for day in days if day["operating"]
+    ]
+
+    return jsonify({
+        "ok": True,
+        "ready_to_save": False,
+        "validation_level": "structure_and_time_only",
+        "message": (
+            "Event structure and times passed validation. "
+            "Employee eligibility, equipment ownership, "
+            "and existing-event conflicts are not yet "
+            "verified. Nothing was saved."
+        ),
+        "calendar_days": len(days),
+        "operating_days": len(active_days),
+        "equipment_assignments": sum(
+            len(day["equipment_ids"])
+            for day in active_days
+        ),
+        "employee_shifts": sum(
+            len(day["shifts"])
+            for day in active_days
+        ),
+    }), 200
+
+
 @app.route("/events/add", methods=["GET"])
 @login_required
 @spa_required
@@ -130221,6 +130345,7 @@ def event_new():
         event_custom_labels=labels,
         available_event_units=units,
         available_event_employees=event_employees,
+        event_csrf_token=_security_form_csrf_token(),
     )
 
 
