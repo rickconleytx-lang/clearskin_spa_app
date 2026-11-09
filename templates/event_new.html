@@ -1748,6 +1748,29 @@
 
 
     let coverageRevision = 0;
+    let coverageAutoEnabled = false;
+    let coverageAutoTimer = null;
+    let coverageAutoPending = false;
+
+    function scheduleAutomaticStaffingReview() {
+        if (!coverageAutoEnabled || !previewButton) return;
+
+        if (coverageAutoTimer !== null) {
+            clearTimeout(coverageAutoTimer);
+        }
+
+        coverageAutoTimer = setTimeout(function () {
+            coverageAutoTimer = null;
+
+            if (previewButton.disabled) {
+                coverageAutoPending = true;
+                return;
+            }
+
+            coverageAutoPending = false;
+            previewButton.click();
+        }, 500);
+    }
 
     function clearStaffingWarnings() {
         if (!employeeDays) return;
@@ -1916,13 +1939,14 @@
             payloadSummary.textContent.includes("SERVER VALIDATION")
         ) {
             payloadSummary.textContent =
-                "Event details changed. Review Captured Event Data " +
-                "again to refresh server coverage warnings.";
+                "Event details changed. Staffing coverage will " +
+                "refresh automatically.";
 
             payloadSummary.classList.remove(
                 "ec-validation-error"
             );
         }
+        scheduleAutomaticStaffingReview();
     }
 
     coverageScope.addEventListener(
@@ -1951,6 +1975,13 @@
         previewButton.addEventListener(
             "click",
             async function () {
+
+                if (coverageAutoTimer !== null) {
+                    clearTimeout(coverageAutoTimer);
+                    coverageAutoTimer = null;
+                }
+
+                coverageAutoPending = false;
 
                 const requestRevision = coverageRevision;
                 clearStaffingWarnings();
@@ -2028,6 +2059,7 @@
                             "structure_and_time_only"
                     ) {
                         renderStaffingWarnings(result);
+                        coverageAutoEnabled = true;
                         payloadSummary.textContent =
                             "SERVER VALIDATION PASSED — " +
                             result.calendar_days +
@@ -2059,6 +2091,10 @@
                     }
 
                 } catch (error) {
+                    if (requestRevision !== coverageRevision) {
+                        return;
+                    }
+
                     payloadSummary.textContent =
                         "SERVER VALIDATION UNAVAILABLE — " +
                         "Check the Local Flask server and " +
@@ -2075,6 +2111,11 @@
 
                 } finally {
                     previewButton.disabled = false;
+
+                    if (coverageAutoPending) {
+                        coverageAutoPending = false;
+                        scheduleAutomaticStaffingReview();
+                    }
                 }
             }
         );
