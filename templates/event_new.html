@@ -200,6 +200,23 @@
     color: #B42318;
     font-weight: 600;
 }
+
+.event-draft .ec-staffing-coverage {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid #D8AD60;
+    border-left: 4px solid #B7791F;
+    border-radius: 8px;
+    background: #FFF8E8;
+    color: #694313;
+    line-height: 1.45;
+}
+.event-draft .ec-staffing-coverage[hidden] {
+    display: none !important;
+}
+.event-draft .ec-staffing-coverage p {
+    margin: 5px 0;
+}
 </style>
 
 <div class="event-draft">
@@ -1359,6 +1376,13 @@
             add.dataset.shiftAction = "add";
 
             card.append(add);
+
+            const coverageNotice = document.createElement("div");
+            coverageNotice.className = "ec-staffing-coverage";
+            coverageNotice.hidden = true;
+            coverageNotice.setAttribute("role", "status");
+            card.append(coverageNotice);
+
             employeeDays.append(card);
         }
 
@@ -1722,6 +1746,205 @@
     }
 
 
+
+    let coverageRevision = 0;
+
+    function clearStaffingWarnings() {
+        if (!employeeDays) return;
+
+        employeeDays.querySelectorAll(".ec-staffing-coverage")
+            .forEach(function (notice) {
+                notice.replaceChildren();
+                notice.hidden = true;
+            });
+    }
+
+    function renderStaffingWarnings(result) {
+        clearStaffingWarnings();
+
+        const report = result.staffing_coverage;
+        const zone = result.staffing_time_zone;
+
+        if (!employeeDays || !report ||
+            !Array.isArray(report.days) ||
+            typeof zone !== "string") return;
+
+        const names = new Map();
+
+        equipmentTemplate.content.querySelectorAll(
+            "input[data-event-unit-id]"
+        ).forEach(function (input) {
+            const label = input.closest("label");
+            const heading = label && label.querySelector("strong");
+
+            names.set(
+                String(input.dataset.eventUnitId),
+                heading ? heading.textContent.trim() : "Equipment"
+            );
+        });
+
+        const clock = new Intl.DateTimeFormat("en-US", {
+            timeZone: zone,
+            hour: "numeric",
+            minute: "2-digit"
+        });
+
+        const dateLabel = new Intl.DateTimeFormat("en-US", {
+            timeZone: zone,
+            month: "short",
+            day: "numeric"
+        });
+
+        function intervalLabel(gap) {
+            const start = new Date(gap.starts_at);
+            const end = new Date(gap.ends_at);
+
+            const differentDays =
+                dateLabel.format(start) !== dateLabel.format(end);
+
+            return (
+                (differentDays ? dateLabel.format(start) + " " : "") +
+                clock.format(start) + " to " +
+                (differentDays ? dateLabel.format(end) + " " : "") +
+                clock.format(end)
+            );
+        }
+
+        function durationLabel(minutes) {
+            const hours = Math.floor(minutes / 60);
+            const remainder = minutes % 60;
+
+            if (hours && remainder) {
+                return hours + " hr " + remainder + " min";
+            }
+
+            if (hours) {
+                return hours + (hours === 1 ? " hour" : " hours");
+            }
+
+            return minutes + " min";
+        }
+
+        for (const day of report.days) {
+            const card = Array.from(
+                employeeDays.querySelectorAll(".ec-employee-day")
+            ).find(function (item) {
+                return item.dataset.date === day.date;
+            });
+
+            if (!card) continue;
+
+            const notice =
+                card.querySelector(".ec-staffing-coverage");
+
+            if (!notice) continue;
+
+            let warnings = 0;
+
+            for (const unit of day.unit_coverage || []) {
+                if (unit.status === "covered") continue;
+
+                warnings++;
+
+                const title = document.createElement("p");
+
+                const unitName = unit.unit_id === null
+                    ? "Event-wide staffing"
+                    : (
+                        names.get(String(unit.unit_id)) ||
+                        "Assigned equipment"
+                    );
+
+                title.textContent =
+                    "⚠ Staffing coverage — " + unitName;
+
+                title.style.fontWeight = "700";
+                title.style.color = "#B42318";
+                notice.append(title);
+
+                for (const gap of unit.gaps || []) {
+                    const detail = document.createElement("p");
+
+                    detail.textContent =
+                        "No employee assigned: " +
+                        intervalLabel(gap) + " (" +
+                        durationLabel(gap.minutes) +
+                        " uncovered).";
+
+                    notice.append(detail);
+                }
+            }
+
+            if (day.unassigned_shift_count > 0) {
+                warnings++;
+
+                const note = document.createElement("p");
+
+                note.textContent =
+                    day.unassigned_shift_count +
+                    " employee shift(s) have no specific " +
+                    "equipment selected and do not count " +
+                    "toward truck coverage.";
+
+                notice.append(note);
+            }
+
+            if (warnings) {
+                const advisory = document.createElement("p");
+
+                advisory.textContent =
+                    "Advisory only — staffing gaps do not block saving.";
+
+                notice.append(advisory);
+                notice.hidden = false;
+            }
+        }
+    }
+
+    // Prevent old validation results from remaining visible
+    // after the owner changes the schedule.
+
+    const coverageScope =
+        document.querySelector(".event-draft") || document;
+
+    function invalidateStaffingReview() {
+        coverageRevision++;
+        clearStaffingWarnings();
+
+        if (
+            payloadSummary &&
+            payloadSummary.textContent.includes("SERVER VALIDATION")
+        ) {
+            payloadSummary.textContent =
+                "Event details changed. Review Captured Event Data " +
+                "again to refresh server coverage warnings.";
+
+            payloadSummary.classList.remove(
+                "ec-validation-error"
+            );
+        }
+    }
+
+    coverageScope.addEventListener(
+        "input", invalidateStaffingReview
+    );
+
+    coverageScope.addEventListener(
+        "change", invalidateStaffingReview
+    );
+
+    coverageScope.addEventListener("click", function (event) {
+        const button = event.target.closest("button");
+
+        if (
+            button &&
+            button !== previewButton &&
+            !button.disabled
+        ) {
+            invalidateStaffingReview();
+        }
+    });
+
     if (previewButton && payloadInput &&
         payloadSummary && transport) {
 
@@ -1729,6 +1952,8 @@
             "click",
             async function () {
 
+                const requestRevision = coverageRevision;
+                clearStaffingWarnings();
                 const payload = collectEventPayload();
 
                 payloadSummary.classList.remove(
@@ -1788,6 +2013,13 @@
 
                     const result = await response.json();
 
+                    if (requestRevision !== coverageRevision) {
+                        payloadSummary.textContent =
+                            "Event changed during validation. " +
+                            "Please review the updated schedule again.";
+                        return;
+                    }
+
                     if (
                         response.ok &&
                         result.ok === true &&
@@ -1795,6 +2027,7 @@
                         result.validation_level ===
                             "structure_and_time_only"
                     ) {
+                        renderStaffingWarnings(result);
                         payloadSummary.textContent =
                             "SERVER VALIDATION PASSED — " +
                             result.calendar_days +

@@ -130125,6 +130125,9 @@ def validate_event_draft():
         EventValidationError,
         validate_event_payload,
     )
+    from services.event_calendar_coverage import (
+        analyze_event_coverage,
+    )
 
     # Event scheduling remains Business Administrator only.
     if (
@@ -130209,6 +130212,8 @@ def validate_event_draft():
         day for day in days if day["operating"]
     ]
 
+    staffing_coverage = analyze_event_coverage(normalized)
+
     return jsonify({
         "ok": True,
         "ready_to_save": False,
@@ -130229,6 +130234,12 @@ def validate_event_draft():
             len(day["shifts"])
             for day in active_days
         ),
+        "staffing_coverage": staffing_coverage,
+        "staffing_warning_count": (
+            staffing_coverage["uncovered_unit_days"]
+        ),
+        "staffing_time_zone": normalized["timezone_name"],
+        "staffing_coverage_advisory": True,
     }), 200
 
 
