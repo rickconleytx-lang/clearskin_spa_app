@@ -152,6 +152,49 @@
         padding: 15px;
     }
 }
+
+.event-draft .ec-employee-day,
+.event-draft .ec-shift-row {
+    border: 1px solid #d9dadd;
+    border-radius: 10px;
+    padding: 18px;
+    margin: 15px 0;
+}
+.event-draft .ec-shift-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.event-draft .ec-shift-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px;
+}
+.event-draft .ec-shift-fields label {
+    display: block;
+    font-weight: 600;
+}
+.event-draft .ec-shift-fields .ec-checkline {
+    display: flex;
+}
+.event-draft .ec-shift-status.is-invalid {
+    color: #B42318;
+    font-weight: 600;
+}
+@media (max-width: 650px) {
+    .event-draft .ec-shift-fields {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+.event-draft .ec-shift-row.is-conflict {
+    border-color: #B42318;
+    border-left: 4px solid #B42318;
+}
 </style>
 
 <div class="event-draft">
@@ -208,10 +251,10 @@
                 <label>Visibility</label>
                 <label>
                     <input type="checkbox">
-                    Public Event
+                    Include on PeachWeb
                 </label>
                 <p class="ec-note">
-                    Public events may later appear on PeachWeb.
+                    When PeachWeb event publishing is enabled, selected events will appear in the Where to Find Us listing.
                 </p>
             </div>
         </div>
@@ -492,14 +535,127 @@
 
     <section class="ec-card">
         <h2>Employee Scheduling</h2>
+
         <p>
-            We'll select employees from existing
+            Assign employees from your existing
             Peach Suite Pro Employee Management records.
         </p>
+
+        {% if available_event_employees %}
+
+        <details>
+            <summary style="cursor:pointer; font-weight:600;">
+                Available Employees in This Workspace
+                ({{ available_event_employees|length }})
+            </summary>
+
+            <div style="padding:12px 0;">
+                <ul>
+                    {% for employee in available_event_employees %}
+                    <li>{{ employee.display_name }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </details>
+
+
+        <h3 style="margin-top:24px;">Employee Shifts by Day</h3>
+
         <p class="ec-note">
-            Shift assignments, active workspace membership
-            checks, and conflict protection will be connected
-            in the scheduling stage. No automatic payroll records.
+            Add one or more shifts for each operating day.
+        </p>
+
+        <p id="ec_employee_message"
+           class="ec-note" role="status" aria-live="polite">
+            Select event dates to schedule employees.
+        </p>
+
+        <div id="ec_employee_days"></div>
+
+        <template id="ec_employee_shift_template">
+            <div class="ec-shift-row">
+                <div class="ec-shift-heading">
+                    <strong class="ec-shift-title"></strong>
+                    <button type="button" class="btn"
+                            data-shift-action="remove">
+                        Remove Shift
+                    </button>
+                </div>
+
+                <div class="ec-shift-fields">
+                    <label class="ec-field">
+                        Employee
+                        <select data-shift-field="employeeId">
+                            <option value="">Choose Employee</option>
+                            {% for employee in available_event_employees %}
+                            <option value="{{ employee.employee_id }}">
+                                {{ employee.display_name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </label>
+
+                    <label class="ec-field">
+                        Shift Start
+                        <input type="time"
+                               data-shift-field="start">
+                    </label>
+
+                    <label class="ec-field">
+                        Shift End
+                        <input type="time"
+                               data-shift-field="end">
+                    </label>
+
+                    <label class="ec-field">
+                        Assigned Equipment (optional)
+                        <select data-shift-field="unitId">
+                            <option value="">No specific equipment</option>
+                        </select>
+                    </label>
+
+                    <label class="ec-checkline ec-wide">
+                        <input type="checkbox"
+                               data-shift-field="overnight">
+                        Shift Ends Next Day
+                    </label>
+
+                    <label class="ec-field">
+                        Shift Role (optional)
+                        <input type="text" maxlength="100"
+                               data-shift-field="role">
+                    </label>
+
+                    <label class="ec-field ec-wide">
+                        Shift Notes (optional)
+                        <textarea rows="2"
+                                  data-shift-field="notes"></textarea>
+                    </label>
+                </div>
+
+                <p class="ec-shift-status" role="status"></p>
+            </div>
+        </template>
+
+        {% else %}
+
+        <p class="ec-note">
+            No active employees are currently assigned to
+            this workspace. Add or assign employees through
+            Employee Management to make them available here.
+        </p>
+
+        {% endif %}
+
+        <p class="ec-note">
+            Shift editing is available in this development
+            preview. Database conflict checks will be
+            connected before event saving is enabled.
+        </p>
+
+        <p class="ec-note">
+            Employee scheduling does not automatically
+            create payroll hours, earnings, or payments.
         </p>
     </section>
 
@@ -571,6 +727,13 @@
     const bulkEquipment =
         document.getElementById("ec_equipment_bulk_choices");
 
+    const employeeDays =
+        document.getElementById("ec_employee_days");
+    const employeeMessage =
+        document.getElementById("ec_employee_message");
+    const shiftTemplate =
+        document.getElementById("ec_employee_shift_template");
+
     const dailyValues = new Map();
     const DAY_MS = 86400000;
     const MAX_PREVIEW_DAYS = 366;
@@ -631,7 +794,8 @@
         return Object.assign({
             operating: true,
             notes: "",
-            equipmentIds: []
+            equipmentIds: [],
+            shifts: []
         }, bulkValues());
     }
 
@@ -887,8 +1051,293 @@
             "or apply a common selection above.";
     }
 
+
+    function showShiftStatus(row, shift, day, hasConflict = false) {
+        const status = row.querySelector(".ec-shift-status");
+        const start = timeMinutes(shift.start);
+        const end = timeMinutes(shift.end);
+        let error = "";
+
+        if (!shift.employeeId) {
+            error = "Select an employee.";
+        } else if (start === null || end === null) {
+            error = "Enter both shift times.";
+        } else {
+            const duration =
+                end + (shift.overnight ? 1440 : 0) - start;
+
+            if (duration <= 0 || duration > 1440) {
+                error = "Review shift hours and overnight setting.";
+            }
+        }
+
+        if (
+            !error && shift.unitId &&
+            !day.equipmentIds.includes(shift.unitId)
+        ) {
+            error = "Equipment is not selected for this day.";
+        }
+
+        if (!error && hasConflict) {
+            error =
+                "Scheduling conflict: This employee has an " +
+                "overlapping shift in this event.";
+        }
+
+        status.textContent = error ||
+            "Shift entered. No overlap within this event preview.";
+
+        status.classList.toggle("is-invalid", Boolean(error));
+        row.classList.toggle("is-conflict", Boolean(hasConflict));
+    }
+
+
+    function refreshEmployeeConflicts() {
+        if (!employeeDays || !employeeMessage) return;
+
+        const byEmployee = new Map();
+        const visibleShifts = new Map();
+
+        for (const card of employeeDays.querySelectorAll(
+            ".ec-employee-day"
+        )) {
+            const dateKey = card.dataset.date;
+            const day = dailyValues.get(dateKey);
+            const date = parseDate(dateKey);
+
+            if (!day || !day.operating || !date) continue;
+
+            for (const row of card.querySelectorAll(
+                ".ec-shift-row"
+            )) {
+                const index = Number(row.dataset.index);
+
+                if (!Number.isInteger(index)) continue;
+
+                const shift = day.shifts[index];
+                if (!shift) continue;
+
+                const key = dateKey + ":" + index;
+
+                visibleShifts.set(key, {
+                    row: row,
+                    shift: shift,
+                    day: day
+                });
+
+                if (!shift.employeeId) continue;
+
+                const startMinute = timeMinutes(shift.start);
+                const endMinute = timeMinutes(shift.end);
+
+                if (
+                    startMinute === null ||
+                    endMinute === null
+                ) continue;
+
+                const duration =
+                    endMinute +
+                    (shift.overnight ? 1440 : 0) -
+                    startMinute;
+
+                if (duration <= 0 || duration > 1440) {
+                    continue;
+                }
+
+                const start =
+                    date.getTime() + startMinute * 60000;
+
+                const end = start + duration * 60000;
+
+                if (!byEmployee.has(shift.employeeId)) {
+                    byEmployee.set(shift.employeeId, []);
+                }
+
+                byEmployee.get(shift.employeeId).push({
+                    key: key,
+                    start: start,
+                    end: end
+                });
+            }
+        }
+
+        const conflicts = new Set();
+
+        for (const shifts of byEmployee.values()) {
+            shifts.sort(function (a, b) {
+                return a.start - b.start;
+            });
+
+            for (let i = 0; i < shifts.length; i++) {
+                for (
+                    let j = i + 1;
+                    j < shifts.length &&
+                    shifts[j].start < shifts[i].end;
+                    j++
+                ) {
+                    // Half-open intervals allow shifts to
+                    // end exactly when the next one starts.
+                    if (
+                        shifts[i].start < shifts[j].end &&
+                        shifts[j].start < shifts[i].end
+                    ) {
+                        conflicts.add(shifts[i].key);
+                        conflicts.add(shifts[j].key);
+                    }
+                }
+            }
+        }
+
+        for (const [key, entry] of visibleShifts) {
+            showShiftStatus(
+                entry.row,
+                entry.shift,
+                entry.day,
+                conflicts.has(key)
+            );
+        }
+
+        if (conflicts.size) {
+            employeeMessage.textContent =
+                "Scheduling conflict: " +
+                conflicts.size +
+                " shift assignment(s) overlap. " +
+                "Review the red warnings below.";
+        } else {
+            employeeMessage.textContent =
+                "No overlapping employee shifts detected " +
+                "within this event preview. Existing events " +
+                "have not been checked yet.";
+        }
+    }
+
+    function renderEmployeeDays() {
+        if (!employeeDays || !shiftTemplate) return;
+
+        employeeDays.replaceChildren();
+
+        const visibleDays =
+            daysContainer.querySelectorAll(".ec-day-row");
+
+        if (!visibleDays.length) {
+            employeeMessage.textContent =
+                "Choose valid event dates above.";
+            return;
+        }
+
+        const equipmentNames = new Map();
+
+        equipmentTemplate.content.querySelectorAll(
+            "input[data-event-unit-id]"
+        ).forEach(function (input) {
+            const name = input.closest("label")
+                .querySelector("strong");
+
+            equipmentNames.set(
+                input.dataset.eventUnitId,
+                name ? name.textContent.trim() : "Equipment"
+            );
+        });
+
+        for (const dateRow of visibleDays) {
+            const dateKey = dateRow.dataset.date;
+            const day = dailyValues.get(dateKey);
+            if (!day) continue;
+
+            const card = document.createElement("div");
+            card.className = "ec-employee-day";
+            card.dataset.date = dateKey;
+
+            const heading = document.createElement("h4");
+            heading.textContent = dateFormatter.format(
+                new Date(dateKey + "T00:00:00Z")
+            );
+            card.append(heading);
+
+            if (!day.operating) {
+                const note = document.createElement("p");
+                note.textContent =
+                    "Non-operating day — shifts inactive.";
+                note.className = "ec-note";
+                card.append(note);
+                employeeDays.append(card);
+                continue;
+            }
+
+            if (!day.shifts.length) {
+                const empty = document.createElement("p");
+                empty.className = "ec-note";
+                empty.textContent =
+                    "No employee shifts assigned.";
+                card.append(empty);
+            }
+
+            day.shifts.forEach(function (shift, index) {
+                const row = shiftTemplate.content
+                    .firstElementChild.cloneNode(true);
+
+                row.dataset.index = String(index);
+
+                row.querySelector(".ec-shift-title")
+                    .textContent = "Shift " + (index + 1);
+
+                const equipmentSelect = row.querySelector(
+                    '[data-shift-field="unitId"]'
+                );
+
+                for (const id of day.equipmentIds) {
+                    const option = document.createElement("option");
+                    option.value = id;
+                    option.textContent =
+                        equipmentNames.get(id) || "Equipment";
+                    equipmentSelect.append(option);
+                }
+
+                if (
+                    shift.unitId &&
+                    !day.equipmentIds.includes(shift.unitId)
+                ) {
+                    const missing = document.createElement("option");
+                    missing.value = shift.unitId;
+                    missing.textContent =
+                        "Previously selected equipment — unavailable";
+                    equipmentSelect.append(missing);
+                }
+
+                row.querySelectorAll("[data-shift-field]")
+                    .forEach(function (input) {
+                        const key = input.dataset.shiftField;
+
+                        if (input.type === "checkbox") {
+                            input.checked = Boolean(shift[key]);
+                        } else {
+                            input.value = shift[key] || "";
+                        }
+                    });
+
+                showShiftStatus(row, shift, day);
+                card.append(row);
+            });
+
+            const add = document.createElement("button");
+            add.type = "button";
+            add.className = "btn";
+            add.textContent = "Add Employee Shift";
+            add.dataset.shiftAction = "add";
+
+            card.append(add);
+            employeeDays.append(card);
+        }
+
+        refreshEmployeeConflicts();
+    }
+
     function renderDays() {
         daysContainer.replaceChildren();
+
+        if (employeeDays) {
+            employeeDays.replaceChildren();
+        }
         equipmentDays.replaceChildren();
         equipmentMessage.textContent =
             "Choose valid event dates above to assign equipment.";
@@ -945,6 +1394,7 @@
             " generated. Customize each date as needed.";
 
         renderEquipmentDays();
+        renderEmployeeDays();
     }
 
     function updateDayFromInput(event) {
@@ -982,6 +1432,7 @@
 
         if (field === "operating") {
             renderEquipmentDays();
+            renderEmployeeDays();
         }
     }
 
@@ -1012,6 +1463,7 @@
         }
 
         values.equipmentIds = Array.from(selected);
+        renderEmployeeDays();
     });
 
     if (applyEquipment && bulkEquipment) {
@@ -1034,7 +1486,74 @@
             }
 
             renderEquipmentDays();
+            renderEmployeeDays();
         });
+    }
+
+
+    if (employeeDays) {
+        employeeDays.addEventListener("click", function (event) {
+            const button = event.target.closest(
+                "button[data-shift-action]"
+            );
+            if (!button) return;
+
+            const card = button.closest(".ec-employee-day");
+            const day = card && dailyValues.get(card.dataset.date);
+            if (!day || !day.operating) return;
+
+            if (button.dataset.shiftAction === "add") {
+                day.shifts.push({
+                    employeeId: "",
+                    start: day.open || "09:00",
+                    end: day.close || "17:00",
+                    overnight: Boolean(day.overnight),
+                    unitId: "",
+                    role: "",
+                    notes: ""
+                });
+            } else if (button.dataset.shiftAction === "remove") {
+                const row = button.closest(".ec-shift-row");
+                if (!row) return;
+
+                const index = Number(row.dataset.index);
+
+                if (
+                    !Number.isInteger(index) ||
+                    index < 0 ||
+                    index >= day.shifts.length
+                ) return;
+
+                day.shifts.splice(index, 1);
+            }
+
+            renderEmployeeDays();
+        });
+
+        function updateShift(event) {
+            const input = event.target;
+            const row = input.closest(".ec-shift-row");
+
+            if (!row || !input.dataset.shiftField) return;
+
+            const card = row.closest(".ec-employee-day");
+            const day = dailyValues.get(card.dataset.date);
+            const index = Number(row.dataset.index);
+
+            if (!day || !day.shifts[index]) return;
+
+            const shift = day.shifts[index];
+            const key = input.dataset.shiftField;
+
+            shift[key] = input.type === "checkbox"
+                ? input.checked
+                : input.value;
+
+            refreshEmployeeConflicts();
+        }
+
+        employeeDays.addEventListener("input", updateShift);
+        employeeDays.addEventListener("change", updateShift);
     }
 
     startInput.addEventListener("change", renderDays);

@@ -130174,6 +130174,44 @@ def event_new():
                 for record in cur.fetchall()
             ]
 
+            # Existing Employee Management records only.
+            # No separate event employee database or login required.
+            # Both membership and employee must be active.
+
+            cur.execute(
+                """
+                SELECT
+                    e.employee_id,
+                    e.first_name,
+                    e.last_name
+                FROM employee_business_unit_memberships AS m
+                JOIN employees AS e
+                  ON e.spa_id = m.spa_id
+                 AND e.employee_id = m.employee_id
+                WHERE m.spa_id = %s
+                  AND m.business_unit_id = %s
+                  AND m.is_active = TRUE
+                  AND e.is_active = TRUE
+                ORDER BY
+                    LOWER(e.last_name),
+                    LOWER(e.first_name),
+                    e.employee_id
+                """,
+                (spa_id, workspace_id),
+            )
+
+            event_employees = [
+                {
+                    "employee_id": record[0],
+                    "display_name": (
+                        str(record[1]).strip()
+                        + " "
+                        + str(record[2]).strip()
+                    ).strip(),
+                }
+                for record in cur.fetchall()
+            ]
+
     finally:
         conn.rollback()
         conn.close()
@@ -130182,6 +130220,7 @@ def event_new():
         "event_new.html",
         event_custom_labels=labels,
         available_event_units=units,
+        available_event_employees=event_employees,
     )
 
 
