@@ -130113,6 +130113,123 @@ def _event_unit_form_values(form):
 # EVENT CALENDAR — VALIDATE DRAFT (NO DATABASE WRITES)
 # ==========================================================
 
+
+# ==========================================================
+# PeachPOS Event Calendar — read-only Month view
+# ==========================================================
+
+@app.route("/events/calendar", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_calendar_month():
+    from calendar import Calendar
+    from datetime import date
+    from flask import request, render_template
+    from services.event_calendar_read import (
+        list_event_calendar_rows,
+    )
+    from services.event_calendar_month import build_month_view
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    today = date.today()
+
+    try:
+        year = int(request.args["year"]) if "year" in request.args else today.year
+        month = int(request.args["month"]) if "month" in request.args else today.month
+    except (ValueError, TypeError):
+        abort(400)
+
+    if not 2000 <= year <= 2100 or not 1 <= month <= 12:
+        abort(400)
+
+    weeks = Calendar(firstweekday=6).monthdatescalendar(year, month)
+    window_start = weeks[0][0]
+    window_end = weeks[-1][-1]
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+
+        rows = list_event_calendar_rows(
+            conn,
+            spa_id,
+            workspace_id,
+            window_start,
+            window_end,
+        )
+
+        calendar_data = build_month_view(
+            rows, year, month, today
+        )
+
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    return render_template(
+        "event_calendar_month.html",
+        calendar=calendar_data,
+    )
+
+
+
+# ==========================================================
+# PeachPOS Event Calendar — protected read-only details
+# ==========================================================
+
+@app.route("/events/<int:event_id>/details", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_calendar_details(event_id):
+    from flask import jsonify
+    from services.event_calendar_details import get_event_details
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    if event_id <= 0:
+        abort(404)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+
+        details = get_event_details(
+            conn,
+            event_id=event_id,
+            spa_id=spa_id,
+            workspace_id=workspace_id,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if details is None:
+        abort(404)
+
+    response = jsonify({"ok": True, "event": details})
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @app.route("/events/validate", methods=["POST"])
 @login_required
 @spa_required
