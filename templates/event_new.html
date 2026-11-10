@@ -233,30 +233,31 @@
     </p>
 
     <p class="ec-note">
-        <strong>Development preview:</strong>
-        This page does not save information yet.
-        Please do not enter real event details until
-        the Save Event workflow is enabled.
+        <strong>Before saving:</strong>
+        Review event details, assigned equipment, and employee shifts. Availability is checked again when you save.
     </p>
 
     <section class="ec-card">
         <h2>Event Information</h2>
+            <p class="ec-note">
+                Fields marked * are required.
+            </p>
 
         <div class="ec-grid">
             <div class="ec-field ec-wide">
-                <label for="event_name">Event Name</label>
+                <label for="event_name">Event Name <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
                 <input id="event_name" maxlength="200"
-                       placeholder="Example: Roanoke Days">
+                       placeholder="Example: Roanoke Days" required aria-required="true">
             </div>
 
             <div class="ec-field">
-                <label for="start_date">Start Date</label>
-                <input type="date" id="start_date">
+                <label for="start_date">Start Date <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input type="date" id="start_date" required aria-required="true">
             </div>
 
             <div class="ec-field">
-                <label for="end_date">End Date</label>
-                <input type="date" id="end_date">
+                <label for="end_date">End Date <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input type="date" id="end_date" required aria-required="true">
             </div>
 
             <div class="ec-field">
@@ -292,8 +293,8 @@
             </div>
 
             <div class="ec-field ec-wide">
-                <label for="street_address">Street Address</label>
-                <input id="street_address" maxlength="255">
+                <label for="street_address">Street Address <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input id="street_address" maxlength="255" required aria-required="true">
             </div>
 
             <div class="ec-field ec-wide">
@@ -302,8 +303,8 @@
             </div>
 
             <div class="ec-field">
-                <label for="city">City</label>
-                <input id="city" maxlength="120">
+                <label for="city">City <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input id="city" maxlength="120" required aria-required="true">
             </div>
 
             <div class="ec-field">
@@ -312,13 +313,13 @@
             </div>
 
             <div class="ec-field">
-                <label for="state">State</label>
-                <input id="state" maxlength="80">
+                <label for="state">State <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input id="state" maxlength="80" required aria-required="true">
             </div>
 
             <div class="ec-field">
-                <label for="zip_code">ZIP Code</label>
-                <input id="zip_code" maxlength="20">
+                <label for="zip_code">ZIP Code <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input id="zip_code" maxlength="20" required aria-required="true">
             </div>
 
             <div class="ec-field ec-wide">
@@ -460,14 +461,11 @@
 
         <p class="ec-note">
             Overnight closing means the closing time occurs
-            on the following calendar day. Time-zone and
-            daylight-saving validation will be performed
-            when event saving is implemented.
+            on the following calendar day. Operating times are validated by the server before saving.
         </p>
 
         <p class="ec-note">
-            Development preview only. Daily hours entered here
-            are not saved to the database yet.
+            Daily operating hours entered here are saved with the event.
         </p>
     </section>
 
@@ -549,9 +547,7 @@
         </template>
 
         <p class="ec-note">
-            Equipment selections are a development preview.
-            Existing reservations and time conflicts will
-            be validated by the server when saving is enabled.
+            Existing reservations and scheduling conflicts are checked before an event is saved.
         </p>
     </section>
 
@@ -670,10 +666,7 @@
         {% endif %}
 
         <p class="ec-note">
-            Shift editing is available in this development
-            preview. Use Review Captured Event Data to check
-            equipment and employee conflicts. Availability
-            will be rechecked when saving is enabled.
+            Use Review Event Details to check equipment and employee conflicts. Availability is checked again when you save.
         </p>
 
         <p class="ec-note">
@@ -706,14 +699,41 @@
     </section>
 
     <p class="ec-note">
-        Save Event will be enabled after the complete
-        server-side validation and scheduling transactions
-        have been implemented and tested.
+        Save Event records event details, daily operating hours, assigned equipment, and employee shifts. Availability is checked before saving.
+    </p>
+
+
+    <p class="ec-note">
+        <strong>Step 1 — Review Your Event</strong>
+        Review required information, operating hours,
+        truck assignments, and employee shifts before saving.
+        The server will check scheduling availability.
+    </p>
+
+    <p style="margin-top:15px;">
+        <button type="button"
+                class="btn"
+                id="ec_preview_payload">
+            Review Event Details
+        </button>
+    </p>
+
+    <p id="ec_payload_summary"
+       class="ec-note"
+       role="status"
+       aria-live="polite">
+        Complete the required fields, review your event, then select Save Event.
+    </p>
+
+    <p class="ec-note">
+        <strong>Step 2 — Save Your Event</strong>
+        When the review looks correct, select Save Event.
+        Availability will be checked again before saving.
     </p>
 
     <form id="ec_event_transport"
           method="POST"
-          action="{{ url_for('event_new') }}">
+          action="{{ url_for('save_peachpos_event') }}">
 
         <input type="hidden"
                name="security_csrf_token"
@@ -723,25 +743,24 @@
                id="ec_event_payload"
                name="event_payload">
 
-        <button class="btn" type="button" disabled>
-            Save Event — Not Yet Enabled
+        <input type="hidden"
+               id="ec_submission_token"
+               name="submission_token">
+
+        <button class="btn"
+                type="submit"
+                id="ec_save_event">
+            Save Event
         </button>
     </form>
 
-    <p style="margin-top:15px;">
-        <button type="button"
-                class="btn"
-                id="ec_preview_payload">
-            Review Captured Event Data
-        </button>
+    <p id="ec_new_event_link" hidden>
+        <a href="{{ url_for('event_new') }}">
+            Create Another Event
+        </a>
     </p>
 
-    <p id="ec_payload_summary"
-       class="ec-note"
-       role="status"
-       aria-live="polite">
-        Development review only. Nothing will be saved.
-    </p>
+
 
 
 <script>
@@ -1649,6 +1668,12 @@
         document.getElementById("ec_preview_payload");
     const payloadSummary =
         document.getElementById("ec_payload_summary");
+    const saveButton =
+        document.getElementById("ec_save_event");
+    const submissionInput =
+        document.getElementById("ec_submission_token");
+    const newEventLink =
+        document.getElementById("ec_new_event_link");
 
     function fieldValue(id) {
         const field = document.getElementById(id);
@@ -1658,6 +1683,33 @@
     function fieldChecked(id) {
         const field = document.getElementById(id);
         return Boolean(field && field.checked);
+    }
+
+
+    function firstMissingRequiredEventField() {
+        const fields = [
+            ["event_name", "Event Name"],
+            ["start_date", "Start Date"],
+            ["end_date", "End Date"],
+            ["street_address", "Street Address"],
+            ["city", "City"],
+            ["state", "State"],
+            ["zip_code", "ZIP Code"]
+        ];
+
+        for (const item of fields) {
+            const element = document.getElementById(item[0]);
+
+            if (!element ||
+                !String(element.value || "").trim()) {
+                return {
+                    element: element,
+                    label: item[1]
+                };
+            }
+        }
+
+        return null;
     }
 
     function collectEventPayload() {
@@ -1738,13 +1790,8 @@
         };
     }
 
-    if (transport) {
-        // Do not permit POST until the secure Save Event
-        // backend is implemented and tested.
-        transport.addEventListener("submit", function (event) {
-            event.preventDefault();
-        });
-    }
+    // Protected Save Event handler is installed after
+    // the existing staffing review initialization.
 
 
 
@@ -1753,8 +1800,16 @@
     let coverageAutoTimer = null;
     let coverageAutoPending = false;
 
+    let saveInProgress = false;
+    let saveCompleted = false;
+    let saveUncertain = false;
+    let pendingSavePayload = null;
+    let pendingSaveToken = null;
+    let lockedControls = null;
+
     function scheduleAutomaticStaffingReview() {
-        if (!coverageAutoEnabled || !previewButton) return;
+        if (!coverageAutoEnabled || !previewButton ||
+            saveInProgress || saveCompleted || saveUncertain) return;
 
         if (coverageAutoTimer !== null) {
             clearTimeout(coverageAutoTimer);
@@ -1964,6 +2019,7 @@
         if (
             button &&
             button !== previewButton &&
+            button !== saveButton &&
             !button.disabled
         ) {
             invalidateStaffingReview();
@@ -1983,6 +2039,24 @@
                 }
 
                 coverageAutoPending = false;
+
+                if (saveInProgress || saveCompleted ||
+                    saveUncertain) return;
+
+                const missingField =
+                    firstMissingRequiredEventField();
+
+                if (missingField) {
+                    clearStaffingWarnings();
+                    payloadInput.value = "";
+                    payloadSummary.textContent =
+                        "REVIEW FAILED — " +
+                        missingField.label + " is required.";
+                    payloadSummary.classList.add(
+                        "ec-validation-error"
+                    );
+                    return;
+                }
 
                 const requestRevision = coverageRevision;
                 clearStaffingWarnings();
@@ -2045,7 +2119,9 @@
 
                     const result = await response.json();
 
-                    if (requestRevision !== coverageRevision) {
+                    if (requestRevision !== coverageRevision ||
+                        saveInProgress || saveCompleted ||
+                        saveUncertain) {
                         payloadSummary.textContent =
                             "Event changed during validation. " +
                             "Please review the updated schedule again.";
@@ -2095,7 +2171,9 @@
                     }
 
                 } catch (error) {
-                    if (requestRevision !== coverageRevision) {
+                    if (requestRevision !== coverageRevision ||
+                        saveInProgress || saveCompleted ||
+                        saveUncertain) {
                         return;
                     }
 
@@ -2114,6 +2192,337 @@
                     );
 
                 } finally {
+                    previewButton.disabled =
+                        saveInProgress || saveCompleted || saveUncertain;
+
+                    if (coverageAutoPending &&
+                        !saveInProgress && !saveCompleted &&
+                        !saveUncertain) {
+                        coverageAutoPending = false;
+                        scheduleAutomaticStaffingReview();
+                    }
+                }
+            }
+        );
+    }
+
+
+    function showSaveStatus(message, error) {
+        payloadSummary.textContent = message;
+        payloadSummary.classList.toggle(
+            "ec-validation-error", Boolean(error)
+        );
+    }
+
+    function lockEditor() {
+        if (lockedControls !== null) return;
+
+        const root =
+            document.querySelector(".event-draft") || transport;
+
+        lockedControls = Array.from(
+            root.querySelectorAll("input, select, textarea, button"),
+            function (control) {
+                return [control, control.disabled];
+            }
+        );
+
+        lockedControls.forEach(function (entry) {
+            entry[0].disabled = true;
+        });
+    }
+
+    function unlockEditor() {
+        if (lockedControls === null) return;
+
+        lockedControls.forEach(function (entry) {
+            entry[0].disabled = entry[1];
+        });
+
+        lockedControls = null;
+    }
+
+    function saveRequestData(serialized, token) {
+        const csrf = transport.querySelector(
+            'input[name="security_csrf_token"]'
+        );
+
+        if (!csrf || !csrf.value) {
+            throw new Error(
+                "Security token missing. Please reload the form."
+            );
+        }
+
+        const data = new FormData();
+        data.append("security_csrf_token", csrf.value);
+        data.append("event_payload", serialized);
+        data.append("submission_token", token);
+
+        return data;
+    }
+
+    if (transport && saveButton && submissionInput &&
+        payloadInput && payloadSummary && previewButton) {
+
+        transport.addEventListener("submit", async function (event) {
+            event.preventDefault();
+
+            if (saveInProgress || saveCompleted) return;
+
+            const retry = saveUncertain;
+            const revision = coverageRevision;
+
+            let saveDispatched = false;
+            let definiteRejection = false;
+
+            try {
+                if (!retry) {
+                    const missingField =
+                        firstMissingRequiredEventField();
+
+                    if (missingField) {
+                        if (missingField.element) {
+                            missingField.element.focus();
+                        }
+                        throw new Error(
+                            missingField.label + " is required."
+                        );
+                    }
+
+                    if (previewButton.disabled) {
+                        throw new Error(
+                            "A staffing review is still running. " +
+                            "Please try saving again."
+                        );
+                    }
+
+                    const payload = collectEventPayload();
+
+                    if (!payload.days.length) {
+                        throw new Error(
+                            "Select a valid event date range."
+                        );
+                    }
+
+                    const serialized = JSON.stringify(payload);
+
+                    if (serialized.length > 500000) {
+                        throw new Error(
+                            "The event information is too large."
+                        );
+                    }
+
+                    if (serialized !== pendingSavePayload) {
+                        if (!window.crypto ||
+                            typeof window.crypto.randomUUID !== "function") {
+                            throw new Error(
+                                "Secure submission tokens are unavailable."
+                            );
+                        }
+
+                        pendingSavePayload = serialized;
+                        pendingSaveToken = window.crypto.randomUUID();
+                    }
+                }
+
+                if (!pendingSavePayload || !pendingSaveToken) {
+                    throw new Error(
+                        "No event submission is available."
+                    );
+                }
+
+                saveInProgress = true;
+                lockEditor();
+
+                saveButton.disabled = true;
+                previewButton.disabled = true;
+
+                payloadInput.value = pendingSavePayload;
+                submissionInput.value = pendingSaveToken;
+
+                if (!retry) {
+                    showSaveStatus(
+                        "Checking schedule availability before saving...",
+                        false
+                    );
+
+                    const response = await fetch(
+                        "{{ url_for('validate_event_draft') }}",
+                        {
+                            method: "POST",
+                            credentials: "same-origin",
+                            headers: {
+                                "Accept": "application/json"
+                            },
+                            body: saveRequestData(
+                                pendingSavePayload,
+                                pendingSaveToken
+                            )
+                        }
+                    );
+
+                    const contentType =
+                        response.headers.get("content-type") || "";
+
+                    if (!contentType.includes("application/json")) {
+                        throw new Error(
+                            "Validation did not return a valid response. " +
+                            "Please check your login session."
+                        );
+                    }
+
+                    const result = await response.json();
+
+                    if (!(
+                        response.ok &&
+                        result.ok === true &&
+                        result.ready_to_save === false &&
+                        result.ownership_validated === true &&
+                        result.availability_validated === true &&
+                        result.validation_level === "database_preflight"
+                    )) {
+                        throw new Error(
+                            typeof result.error === "string"
+                                ? result.error
+                                : "Event validation failed."
+                        );
+                    }
+
+                    if (
+                        revision !== coverageRevision ||
+                        JSON.stringify(collectEventPayload()) !==
+                            pendingSavePayload
+                    ) {
+                        throw new Error(
+                            "Event details changed during validation. " +
+                            "Please review and retry."
+                        );
+                    }
+
+                    renderStaffingWarnings(result);
+                }
+
+                showSaveStatus(
+                    retry
+                        ? "Checking the original Save Event request..."
+                        : "Saving event and schedules...",
+                    false
+                );
+
+                // Once dispatched, a missing response does
+                // not prove that the save failed.
+                saveDispatched = true;
+
+                const response = await fetch(
+                    "{{ url_for('save_peachpos_event') }}",
+                    {
+                        method: "POST",
+                        credentials: "same-origin",
+                        headers: {
+                            "Accept": "application/json"
+                        },
+                        body: saveRequestData(
+                            pendingSavePayload,
+                            pendingSaveToken
+                        )
+                    }
+                );
+
+                const contentType =
+                    response.headers.get("content-type") || "";
+
+                if (!contentType.includes("application/json")) {
+                    throw new Error(
+                        "Save confirmation was not received."
+                    );
+                }
+
+                const result = await response.json();
+
+                if (
+                    response.ok &&
+                    result.ok === true &&
+                    result.saved === true &&
+                    Number.isSafeInteger(result.event_id) &&
+                    result.event_id > 0
+                ) {
+                    saveCompleted = true;
+                    saveUncertain = false;
+
+                    showSaveStatus(
+                        result.duplicate
+                            ? "Event #" + result.event_id +
+                              " was already saved. No duplicate created."
+                            : "Event #" + result.event_id +
+                              " saved successfully with its schedules.",
+                        false
+                    );
+
+                    if (newEventLink) {
+                        newEventLink.hidden = false;
+                    }
+
+                    return;
+                }
+
+                if (
+                    [400, 403, 409, 413, 422].includes(response.status) &&
+                    result.saved === false
+                ) {
+                    definiteRejection = true;
+                }
+
+                throw new Error(
+                    typeof result.error === "string"
+                        ? result.error
+                        : "The save status could not be confirmed."
+                );
+
+            } catch (error) {
+                if (saveDispatched && !definiteRejection) {
+                    saveUncertain = true;
+
+                    showSaveStatus(
+                        "SAVE STATUS UNKNOWN — The event may have " +
+                        "been saved. Do not reload or edit. " +
+                        "Select Check / Retry Save.",
+                        true
+                    );
+
+                    console.warn(
+                        "Save confirmation unavailable:",
+                        error.message
+                    );
+
+                } else {
+                    saveUncertain = false;
+
+                    showSaveStatus(
+                        "EVENT NOT SAVED — " +
+                        (error.message || "Review and retry."),
+                        true
+                    );
+                }
+
+            } finally {
+                saveInProgress = false;
+
+                if (saveCompleted) {
+                    saveButton.textContent = "Event Saved";
+                    saveButton.disabled = true;
+                    previewButton.disabled = true;
+
+                } else if (saveUncertain) {
+                    // Preserve original payload and token.
+                    // Keep all event editing controls locked.
+                    saveButton.textContent = "Check / Retry Save";
+                    saveButton.disabled = false;
+                    previewButton.disabled = true;
+
+                } else {
+                    unlockEditor();
+                    saveButton.textContent = "Save Event";
+                    saveButton.disabled = false;
                     previewButton.disabled = false;
 
                     if (coverageAutoPending) {
@@ -2122,7 +2531,7 @@
                     }
                 }
             }
-        );
+        });
     }
 
     renderDays();

@@ -23,7 +23,7 @@ class EventValidationError(ValueError):
 
 FIELD_LIMITS = {
     "name": (200, True),
-    "venue_name": (200, True),
+    "venue_name": (200, False),
     "street_address": (255, True),
     "address_line2": (255, False),
     "city": (120, True),
