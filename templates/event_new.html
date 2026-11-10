@@ -1636,6 +1636,20 @@
     startInput.addEventListener("change", renderDays);
     endInput.addEventListener("change", renderDays);
 
+    // EC-060-8: Calendar day-number quick add.
+    window.addEventListener("load", function () {
+        const requestedDate =
+            new URLSearchParams(window.location.search).get("date");
+
+        if (!requestedDate || !parseDate(requestedDate)) {
+            return;
+        }
+
+        startInput.value = requestedDate;
+        endInput.value = requestedDate;
+        renderDays();
+    });
+
     daysContainer.addEventListener(
         "input", updateDayFromInput
     );

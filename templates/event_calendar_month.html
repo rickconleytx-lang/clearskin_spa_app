@@ -96,10 +96,19 @@
     box-shadow: inset 0 0 0 2px #237f7b;
 }
 .ec-month-day-number {
+    display: inline-block;
+    color: inherit;
+    text-decoration: none;
     font-size: 0.9rem;
     font-weight: 650;
     margin-bottom: 8px;
 }
+.ec-month-day-number:hover,
+.ec-month-day-number:focus-visible {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
 .ec-month-day.is-outside .ec-month-day-number {
     color: #aaa39b;
 }
@@ -280,9 +289,11 @@
                 {% for day in week %}
                     <div class="ec-month-day{% if not day.in_month %} is-outside{% endif %}{% if day.today %} is-today{% endif %}"
                          aria-label="{{ day.date.strftime('%A, %B %d, %Y') }}">
-                        <div class="ec-month-day-number">
+                        <a class="ec-month-day-number"
+                           href="{{ url_for('event_new', date=day.date.isoformat()) }}"
+                           aria-label="Add event on {{ day.date.strftime('%A, %B %d, %Y') }}">
                             {{ day.number }}
-                        </div>
+                        </a>
 
                         {% for item in day.entries %}
                             <button type="button" class="ec-month-event"
