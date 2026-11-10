@@ -130292,6 +130292,158 @@ def validate_event_draft():
     }), 200
 
 
+# ==========================================================
+# PEACHPOS EVENT CALENDAR — SECURE EVENT SAVE
+#
+# The browser Save button remains disabled until endpoint
+# security, retry, and integration tests are complete.
+# ==========================================================
+
+@app.route("/events/save", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def save_peachpos_event():
+    import json
+    from flask import jsonify
+    from services.event_calendar_save import (
+        EventSaveConflict,
+        EventSaveError,
+        EventSaveInvalid,
+        save_event_draft,
+    )
+
+    # Event creation remains Business Administrator only.
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        request.content_length is None
+        or request.content_length > 600000
+    ):
+        abort(413)
+
+    raw_payload = request.form.get("event_payload", "")
+    submission_token = (
+        request.form.get("submission_token") or ""
+    ).strip()
+
+    if not raw_payload or len(raw_payload) > 500000:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "Missing or oversized event data.",
+        }), 400
+
+    if not submission_token or len(submission_token) > 80:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "Missing or invalid submission token.",
+        }), 422
+
+    try:
+        payload = json.loads(raw_payload)
+    except (ValueError, TypeError, RecursionError):
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "Invalid event data format.",
+        }), 400
+
+    if type(payload) is not dict:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "Invalid event submission structure.",
+        }), 422
+
+    # Never accept business, workspace, or user identity
+    # from the submitted event JSON.
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+
+    try:
+        result = save_event_draft(
+            conn,
+            payload,
+            spa_id,
+            workspace_id,
+            actor_id,
+            submission_token,
+        )
+
+    except EventSaveConflict as exc:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": str(exc),
+        }), 409
+
+    except EventSaveInvalid as exc:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": str(exc),
+        }), 422
+
+    except EventSaveError:
+        app.logger.error(
+            "PeachPOS Event save failed for business %s "
+            "workspace %s: EventSaveError",
+            spa_id, workspace_id,
+        )
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "The event could not be saved.",
+        }), 500
+
+    except Exception as exc:
+        # Do not log raw event payloads or contact information.
+        app.logger.error(
+            "PeachPOS Event save failed for business %s "
+            "workspace %s: %s",
+            spa_id, workspace_id, type(exc).__name__,
+        )
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "The event could not be saved.",
+        }), 500
+
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    created = result["created"]
+
+    return jsonify({
+        "ok": True,
+        "saved": True,
+        "event_id": result["event_id"],
+        "created": created,
+        "duplicate": result["duplicate"],
+        "message": (
+            "Event saved successfully."
+            if created
+            else "This event was already saved."
+        ),
+    }), (201 if created else 200)
+
+
 @app.route("/events/add", methods=["GET"])
 @login_required
 @spa_required
