@@ -1,7 +1,9 @@
-"""Event Edit interface contracts at preview stage."""
+"""EC-062-14D-2: event edit opens without lease, and prefill preserves Create."""
 import unittest
 from pathlib import Path
+
 ROOT = Path(__file__).resolve().parents[1]
+
 
 class EventEditUITests(unittest.TestCase):
     @classmethod
@@ -10,32 +12,29 @@ class EventEditUITests(unittest.TestCase):
         cls.calendar = (ROOT / "templates/event_calendar_month.html").read_text()
         cls.form = (ROOT / "templates/event_new.html").read_text()
 
-    def test_calendar_receives_csrf(self):
+    def test_calendar_retains_protected_event_details(self):
+        self.assertIn('data-details-url=', self.calendar)
+        self.assertIn('id="ec-detail-edit"', self.calendar)
         self.assertIn('event_csrf_token=_security_form_csrf_token()', self.app)
         self.assertIn('id="ec-calendar-edit-csrf"', self.calendar)
 
-    def test_edit_button_and_lock_url(self):
-        self.assertIn('id="ec-detail-edit"', self.calendar)
-        self.assertIn('data-edit-lock-url=', self.calendar)
+    def test_open_editor_uses_only_event_id(self):
+        self.assertIn('editUrl.searchParams.set("edit", String(activeEventId))', self.calendar)
+        self.assertNotIn('data-edit-lock-url=', self.calendar)
 
-    def test_acquire_via_post(self):
-        self.assertIn('data.append("action", "acquire")', self.calendar)
-        self.assertIn('method: "POST"', self.calendar)
+    def test_open_editor_does_not_acquire_lease(self):
+        self.assertNotIn('data.append("action", "acquire")', self.calendar)
+        self.assertNotIn('/edit-lock', self.calendar)
 
-    def test_token_not_in_url(self):
-        self.assertIn('sessionStorage.setItem(key', self.calendar)
-        self.assertIn('searchParams.set("edit"', self.calendar)
-        self.assertNotIn('searchParams.set("lock_token"', self.calendar)
-
-    def test_busy_editor_status(self):
-        self.assertIn('result.status === "busy"', self.calendar)
-        self.assertIn('result.editor_display_name', self.calendar)
+    def test_no_tab_storage_or_editor_busy_ui(self):
+        self.assertNotIn('sessionStorage', self.calendar)
+        self.assertNotIn('result.status === "busy"', self.calendar)
 
     def test_edit_mode_disables_create_save_handler(self):
         self.assertIn('if (!isEditMode && transport && saveButton', self.form)
         self.assertIn('action="{% if event_edit_id %}#', self.form)
 
-    def test_edit_save_stays_disabled_until_verified_prefill(self):
+    def test_edit_save_disabled_until_verified_prefill(self):
         self.assertIn("{{ 'Save Changes' if event_edit_id else 'Save Event' }}", self.form)
         self.assertIn('{% if event_edit_id %}disabled{% endif %}', self.form)
         self.assertIn('save.disabled = true;', self.form)
@@ -50,13 +49,15 @@ class EventEditUITests(unittest.TestCase):
         self.assertIn('day.equipment_ids.map(String)', self.form)
         self.assertIn('String(shift.employee_id)', self.form)
 
-    def test_cancel_releases_lease(self):
+    def test_cancel_navigates_without_lease_release(self):
         self.assertIn('id="ec_cancel_edit"', self.form)
-        self.assertIn('release.append("action", "release")', self.form)
+        self.assertIn('window.location.assign("/events/calendar");', self.form)
+        self.assertNotIn('release.append("action", "release")', self.form)
 
     def test_add_event_still_uses_create_endpoint(self):
         self.assertIn("url_for('save_peachpos_event')", self.form)
         self.assertIn('if (isEditMode) return;', self.form)
+
 
 if __name__ == "__main__":
     unittest.main()

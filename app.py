@@ -130196,6 +130196,7 @@ def peachpos_event_calendar_month():
 def peachpos_event_calendar_details(event_id):
     from flask import jsonify
     from services.event_calendar_details import get_event_details
+    from services.event_calendar_edit_history_view import load_event_history_text
 
     if current_business_unit_membership_role_code() != "organization_admin":
         abort(403)
@@ -130216,6 +130217,16 @@ def peachpos_event_calendar_details(event_id):
             spa_id=spa_id,
             workspace_id=workspace_id,
         )
+
+        # Audit lookup shares this READ ONLY transaction.
+        if details is not None:
+            with conn.cursor() as history_cur:
+                details["history_text"] = load_event_history_text(
+                    history_cur,
+                    spa_id=spa_id,
+                    workspace_id=workspace_id,
+                    event_id=event_id,
+                )
     finally:
         try:
             conn.rollback()
@@ -130565,6 +130576,249 @@ def save_peachpos_event():
 # ==========================================================
 # PeachPOS Event Calendar — protected exclusive editing lease
 # ==========================================================
+
+@app.route("/events/<int:event_id>/edit-draft", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_edit_draft(event_id):
+    from flask import jsonify
+    from services.event_calendar_edit_read import (
+        EventEditReadError,
+        load_event_edit_payload,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    if event_id <= 0:
+        abort(404)
+
+    if (
+        request.content_length is not None
+        and request.content_length > 8192
+    ):
+        abort(413)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    def respond(payload, status=200):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response, status
+
+    conn = get_db_connection()
+
+    try:
+        # Read the saved draft in a consistent, read-only transaction.
+        # Opening the editor never acquires a lease.
+        conn.set_session(
+            readonly=True,
+            isolation_level="REPEATABLE READ",
+            autocommit=False,
+        )
+
+        draft = load_event_edit_payload(
+            conn,
+            event_id=event_id,
+            spa_id=spa_id,
+            workspace_id=workspace_id,
+        )
+
+        if draft is None:
+            return respond({"status": "not_found"}, 404)
+
+        return respond({
+            "ok": True,
+            "event": draft,
+        })
+
+    except EventEditReadError:
+        return respond({
+            "status": "unavailable",
+            "message": "This saved event cannot be opened for editing.",
+        }, 409)
+
+    finally:
+        # Read-only request: never commit or acquire an edit lock.
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+
+@app.route("/events/<int:event_id>/edit-save-unlocked", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_edit_save_unlocked(event_id):
+    """Save an existing event with server identity and an atomic revision guard.
+
+    Never accept the actor, business, or workspace from the browser.
+    Only this edit endpoint calls update_event_draft; Create Event is separate.
+    """
+    import json
+    from flask import jsonify
+    from services.event_calendar_edit_update import (
+        EventEditUpdateConflict,
+        EventEditUpdateError,
+        EventEditUpdateInvalid,
+        update_event_draft,
+    )
+
+    def respond(payload, status=200):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response, status
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+    if event_id <= 0:
+        abort(404)
+    if (
+        request.content_length is None
+        or request.content_length > 600000
+    ):
+        abort(413)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_payload = request.form.get("event_payload", "")
+    revision_raw = (request.form.get("expected_revision") or "").strip()
+
+    if not raw_payload or len(raw_payload) > 500000:
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Missing or oversized event data.",
+        }, 400)
+    if (
+        not revision_raw.isascii()
+        or not revision_raw.isdecimal()
+        or len(revision_raw) > 18
+    ):
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event revision.",
+        }, 400)
+    expected_revision = int(revision_raw)
+    if expected_revision < 1:
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event revision.",
+        }, 400)
+
+    try:
+        payload = json.loads(raw_payload)
+    except (ValueError, TypeError, RecursionError):
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event data format.",
+        }, 400)
+    if type(payload) is not dict:
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event submission structure.",
+        }, 422)
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+    conn = get_db_connection()
+
+    try:
+        # Derive display name from the authenticated database user.
+        # JSON key access avoids assumptions about legacy user-name columns.
+        # No browser-provided identity is trusted or reflected in history.
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COALESCE(
+                    NULLIF(BTRIM(CONCAT_WS(' ',
+                        NULLIF(BTRIM(to_jsonb(u)->>'first_name'), ''),
+                        NULLIF(BTRIM(to_jsonb(u)->>'last_name'), '')
+                    )), ''),
+                    NULLIF(BTRIM(to_jsonb(u)->>'display_name'), ''),
+                    NULLIF(BTRIM(to_jsonb(u)->>'full_name'), ''),
+                    NULLIF(BTRIM(to_jsonb(u)->>'username'), ''),
+                    'Administrator #' || u.user_id::text
+                )
+                FROM public.users AS u
+                WHERE u.user_id = %s
+                """,
+                (actor_id,),
+            )
+            editor = cur.fetchone()
+
+        if not editor or not editor[0]:
+            return respond({
+                "ok": False, "saved": False,
+                "error": "Administrator account is unavailable.",
+            }, 403)
+        editor_name = str(editor[0]).strip()[:200]
+
+        result = update_event_draft(
+            conn, payload,
+            spa_id=spa_id,
+            workspace_id=workspace_id,
+            event_id=event_id,
+            actor_id=actor_id,
+            actor_display_name=editor_name,
+            expected_revision=expected_revision,
+        )
+        return respond({
+            "ok": True,
+            "saved": True,
+            "event_id": result["event_id"],
+            "event_revision": result["revision_after"],
+            "message": "Event changes saved successfully.",
+        })
+    except EventEditUpdateConflict as exc:
+        return respond({
+            "ok": False, "saved": False,
+            "error": str(exc),
+        }, 409)
+    except EventEditUpdateInvalid as exc:
+        return respond({
+            "ok": False, "saved": False,
+            "error": str(exc),
+        }, 422)
+    except ValueError:
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event edit request.",
+        }, 400)
+    except EventEditUpdateError:
+        app.logger.error(
+            "PeachPOS Edit Event failed for business %s workspace %s",
+            spa_id, workspace_id,
+        )
+        return respond({
+            "ok": False, "saved": False,
+            "error": "The event could not be updated.",
+        }, 500)
+    except Exception:
+        app.logger.exception(
+            "Unexpected PeachPOS Edit Event failure for business %s "
+            "workspace %s", spa_id, workspace_id,
+        )
+        return respond({
+            "ok": False, "saved": False,
+            "error": "The event could not be updated.",
+        }, 500)
+    finally:
+        conn.close()
+
 
 @app.route("/events/<int:event_id>/edit-lock", methods=["POST"])
 @login_required

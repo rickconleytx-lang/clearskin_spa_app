@@ -279,17 +279,51 @@ from services.event_calendar_availability import (
 from services.event_calendar_save import _create_schedules, _create_custom_values
 
 
+def _lock_current_event_revision(
+    cur, *, spa_id, workspace_id, event_id, expected_revision
+):
+    """Serialize competing edits at the event ROW, not during page viewing.
+
+    A caller must use a writable, non-autocommit transaction. PostgreSQL's
+    SELECT FOR UPDATE holds the row lock until commit/rollback; under READ
+    COMMITTED, the second save sees the first committed revision.
+    """
+    if not all(map(_positive_id, (
+        spa_id, workspace_id, event_id, expected_revision,
+    ))):
+        raise ValueError("Invalid Event Edit scope or revision.")
+
+    cur.execute(
+        "SELECT event_revision FROM public.event_calendar_events "
+        "WHERE spa_id = %s AND business_unit_id = %s AND event_id = %s "
+        "FOR UPDATE",
+        (spa_id, workspace_id, event_id),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise EventEditUpdateConflict(
+            "This event is no longer available for editing. "
+            "Your changes have not been saved."
+        )
+    if int(row[0]) != expected_revision:
+        raise EventEditUpdateConflict(
+            "This event has changed since you opened it. "
+            "Your changes have not been saved. "
+            "Review the latest event before trying again."
+        )
+    return expected_revision
+
+
 def update_event_draft(
     conn, payload, *, spa_id, workspace_id, event_id,
-    actor_id, actor_display_name, lock_token, expected_revision,
+    actor_id, actor_display_name, expected_revision, lock_token=None,
 ):
-    """Atomically edit one existing event using its exclusive lease.
+    """Atomically update one event with a revision guard and history.
 
-    Call only after Flask authenticates and authorizes the administrator.
-    All scope and actor values must be server-derived except for the event
-    path identifier, lock token, and expected revision, which are verified.
-    This service owns commit/rollback, but never connection close. It is
-    intentionally NOT attached to an HTTP route until DB tests pass.
+    The optional lock_token preserves the existing lease-bound caller while
+    the new no-lease save path is independently tested. The new path locks
+    ONLY the database event row for the duration of this save transaction.
+    Actor and scope are always server-derived. Owns commit/rollback only.
     """
     if not all(map(_positive_id, (
         spa_id, workspace_id, event_id, actor_id, expected_revision,
@@ -303,7 +337,7 @@ def update_event_draft(
     ):
         raise ValueError("Invalid Event Edit administrator display name.")
 
-    if type(lock_token) is not str or not lock_token.strip():
+    if lock_token is not None and (type(lock_token) is not str or not lock_token.strip()):
         raise ValueError("Invalid Event Edit session token.")
 
     if conn.autocommit:
@@ -313,12 +347,19 @@ def update_event_draft(
 
     try:
         with conn.cursor() as cur:
-            # Row-lock both the event and lease for the entire transaction.
-            require_event_edit_lock_for_save(
-                cur, spa_id=spa_id, workspace_id=workspace_id,
-                event_id=event_id, actor_id=actor_id,
-                lock_token=lock_token, expected_revision=expected_revision,
-            )
+            if lock_token is None:
+                # New path: serialize saves on the event row alone.
+                _lock_current_event_revision(
+                    cur, spa_id=spa_id, workspace_id=workspace_id,
+                    event_id=event_id, expected_revision=expected_revision,
+                )
+            else:
+                # Temporary compatibility until browser/endpoint cutover.
+                require_event_edit_lock_for_save(
+                    cur, spa_id=spa_id, workspace_id=workspace_id,
+                    event_id=event_id, actor_id=actor_id,
+                    lock_token=lock_token, expected_revision=expected_revision,
+                )
 
             before = load_event_edit_payload(
                 conn, event_id=event_id,
@@ -354,7 +395,7 @@ def update_event_draft(
                     excluded_event=(workspace_id, event_id),
                 )
 
-            # Everything below is protected by the lease and one transaction.
+            # All writes are protected by this transaction and event-row lock.
             revision_after = _update_existing_event_header(
                 cur, normalized, spa_id=spa_id,
                 workspace_id=workspace_id, event_id=event_id,
@@ -393,22 +434,23 @@ def update_event_draft(
                 revision_after=revision_after, changes=changes,
             )
 
-            # Consume the very same lease only after all writes succeeded.
-            # Recheck expiration against DB clock; failure rolls back all.
-            cur.execute(
-                "DELETE FROM public.event_calendar_edit_locks "
-                "WHERE spa_id = %s AND business_unit_id = %s "
-                "AND event_id = %s AND editor_user_id = %s "
-                "AND lock_token = %s::uuid "
-                "AND expires_at > clock_timestamp() "
-                "RETURNING event_id",
-                (spa_id, workspace_id, event_id, actor_id, lock_token),
-            )
-            released = cur.fetchone()
-            if released is None or int(released[0]) != event_id:
-                raise EventEditUpdateConflict(
-                    "Editing session expired before save completed."
+            if lock_token is not None:
+                # Consume the very same lease only after all writes succeeded.
+                # Recheck expiration against DB clock; failure rolls back all.
+                cur.execute(
+                    "DELETE FROM public.event_calendar_edit_locks "
+                    "WHERE spa_id = %s AND business_unit_id = %s "
+                    "AND event_id = %s AND editor_user_id = %s "
+                    "AND lock_token = %s::uuid "
+                    "AND expires_at > clock_timestamp() "
+                    "RETURNING event_id",
+                    (spa_id, workspace_id, event_id, actor_id, lock_token),
                 )
+                released = cur.fetchone()
+                if released is None or int(released[0]) != event_id:
+                    raise EventEditUpdateConflict(
+                        "Editing session expired before save completed."
+                    )
 
         conn.commit()
         return {

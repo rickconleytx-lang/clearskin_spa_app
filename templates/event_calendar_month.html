@@ -294,7 +294,6 @@
                         {% for item in day.entries %}
                             <button type="button" class="ec-month-event"
                                  data-details-url="{{ url_for('peachpos_event_calendar_details', event_id=item.event_id) }}"
-                                    data-edit-lock-url="{{ url_for('peachpos_event_edit_lock', event_id=item.event_id) }}"
                                  style="background-color: {{ item.color }};
                                         color: {{ item.text_color }};"
                                  title="{{ item.name }} — {{ item.unit }} — {{ item.hours }}">
@@ -325,6 +324,20 @@
         Multi-day events appear on each scheduled operating day.
         Select Add Event to create another schedule.
     </p>
+
+<style>
+#ec-detail-dialog .ec-detail-section.ec-detail-history {
+    background: #F8F0EA;
+    border: 1px solid #EADBD2;
+    border-left: 4px solid #86616B;
+    border-radius: 10px;
+    padding: 14px 17px;
+    margin-top: 16px;
+    margin-bottom: 16px;
+}
+#ec-detail-dialog .ec-detail-history h3 { margin-top: 0; }
+#ec-detail-dialog .ec-detail-history p { margin-bottom: 0; }
+</style>
 
 <dialog id="ec-detail-dialog"
         class="ec-detail-dialog"
@@ -371,7 +384,6 @@
     const editCsrf = document.getElementById("ec-calendar-edit-csrf");
     let activeEventButton = null;
     let activeEventId = null;
-    let editInProgress = false;
 
     let currentRequest = 0;
     let previousFocus = null;
@@ -458,6 +470,12 @@
             const end = displayDate(event.end_date);
             line(dates, start === end ? start : start + " – " + end);
         }
+
+        // Server formats this text in the business time zone.
+        // Treat saved administrator names as text, never as HTML.
+        const history = section("Event History");
+        history.classList.add("ec-detail-history");
+        line(history, event.history_text || "Event history unavailable.");
 
         const schedule = section("Daily Operating Schedule");
 
@@ -597,8 +615,7 @@
             if (requestNumber === currentRequest && dialog.open) {
                 renderDetails(payload.event);
                 const eventId = Number(payload.event && payload.event.event_id);
-                if (Number.isSafeInteger(eventId) && eventId > 0 &&
-                    button.dataset.editLockUrl) {
+                if (Number.isSafeInteger(eventId) && eventId > 0) {
                     activeEventButton = button;
                     activeEventId = eventId;
                     editButton.hidden = false;
@@ -627,75 +644,14 @@
     });
 
 
-    editButton.addEventListener("click", async function () {
-        if (editInProgress || !activeEventButton ||
-            !activeEventId || !dialog.open) return;
-
-        editInProgress = true;
-        editButton.disabled = true;
-        closeButton.disabled = true;
-        editMessage.textContent = "Opening editing session...";
-
-        const eventId = activeEventId;
-        const lockUrl = activeEventButton.dataset.editLockUrl;
-        const csrf = editCsrf.value;
-        try {
-            if (!csrf) throw new Error("Security token unavailable.");
-            const data = new FormData();
-            data.append("security_csrf_token", csrf);
-            data.append("action", "acquire");
-            const response = await fetch(lockUrl, {
-                method: "POST", credentials: "same-origin",
-                cache: "no-store", headers: {"Accept": "application/json"},
-                body: data
-            });
-            const result = await response.json();
-            if (response.status === 409 && result.status === "busy") {
-                const editor = result.editor_display_name ||
-                    result.editor_name || "another administrator";
-                editMessage.textContent =
-                    "This event is currently being edited by " + String(editor) + ".";
-                return;
-            }
-            if (!response.ok || result.status !== "acquired" ||
-                typeof result.lock_token !== "string" ||
-                !Number.isSafeInteger(result.event_revision)) {
-                throw new Error("Could not acquire editing session.");
-            }
-            const key = "psp:peachpos:event-edit:" + eventId;
-            try {
-                sessionStorage.setItem(key, JSON.stringify({
-                    lock_token: result.lock_token,
-                    event_revision: result.event_revision
-                }));
-            } catch (_storageError) {
-                const release = new FormData();
-                release.append("security_csrf_token", csrf);
-                release.append("action", "release");
-                release.append("lock_token", result.lock_token);
-                try {
-                    await fetch(lockUrl, {
-                        method: "POST", credentials: "same-origin", body: release
-                    });
-                } catch (_releaseError) {
-                    // The server lease expires automatically.
-                }
-                throw new Error("Session storage unavailable.");
-            }
-            const editUrl = new URL(
-                "{{ url_for('event_new') }}", window.location.href
-            );
-            // Only event ID in URL; private editing token stays in tab storage.
-            editUrl.searchParams.set("edit", String(eventId));
-            window.location.assign(editUrl.href);
-        } catch (_error) {
-            editMessage.textContent =
-                "Unable to open the editing session. Please try again.";
-        } finally {
-            editInProgress = false;
-            editButton.disabled = false;
-            closeButton.disabled = false;
-        }
+    // Opening the edit page is only a read. No lock, session, or lease.
+    editButton.addEventListener("click", function () {
+        if (!activeEventId || !activeEventButton || !dialog.open) return;
+        const editUrl = new URL(
+            "{{ url_for('event_new') }}", window.location.href
+        );
+        editUrl.searchParams.set("edit", String(activeEventId));
+        window.location.assign(editUrl.href);
     });
 
     closeButton.addEventListener("click", function () {

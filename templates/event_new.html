@@ -217,14 +217,32 @@
 .event-draft .ec-staffing-coverage p {
     margin: 5px 0;
 }
+/* Edit mode only: quiet, clearly separated audit banner. */
+.event-draft .ec-edit-history-top {
+    background: #F8F0EA;
+    border: 1px solid #EADBD2;
+    border-left: 4px solid #86616B;
+    border-radius: 10px;
+    color: #523B43;
+    font-weight: 600;
+    padding: 13px 16px;
+    margin: 10px 0 18px;
+}
 </style>
 
 <div class="event-draft">
 
     <h1>Add Event</h1>
+    {% if event_edit_id %}
+    <p id="ec_edit_history_top" class="ec-edit-history-top" role="note" hidden></p>
+    {% endif %}
 
     <p>
-        <a href="{{ url_for('admin') }}">Back to Calendar Settings</a>
+        {% if event_edit_id %}
+            <a id="ec_back_to_calendar" href="{{ url_for('peachpos_event_calendar_month') }}">Back to Event Calendar</a>
+            {% else %}
+            <a href="{{ url_for('admin') }}">Back to Calendar Settings</a>
+            {% endif %}
     </p>
 
     <p>
@@ -699,7 +717,11 @@
     </section>
 
     <p class="ec-note">
-        Save Event records event details, daily operating hours, assigned equipment, and employee shifts. Availability is checked before saving.
+        {% if event_edit_id %}
+            Save Changes updates this existing event, including its operating hours, equipment, and employee shifts. Availability is checked before saving.
+            {% else %}
+            Save Event records event details, daily operating hours, assigned equipment, and employee shifts. Availability is checked before saving.
+            {% endif %}
     </p>
 
 
@@ -722,12 +744,16 @@
        class="ec-note"
        role="status"
        aria-live="polite">
-        Complete the required fields, review your event, then select Save Event.
+        Complete the required fields, review your event, then select {{ 'Save Changes' if event_edit_id else 'Save Event' }}.
     </p>
 
     <p class="ec-note">
-        <strong>Step 2 — Save Your Event</strong>
-        When the review looks correct, select Save Event.
+        {% if event_edit_id %}
+            <strong>Step 2 — Save Your Changes</strong>
+            {% else %}
+            <strong>Step 2 — Save Your Event</strong>
+            {% endif %}
+        When the review looks correct, select {{ 'Save Changes' if event_edit_id else 'Save Event' }}.
         Availability will be checked again before saving.
     </p>
 
@@ -738,8 +764,9 @@
             Loading your saved event...
         </p>
         <p class="ec-note">
-            Changes update this event in place. Another administrator
-            cannot edit it while your editing session is active.
+            Multiple administrators can review this event at once.
+            If someone saves a newer version first, your save will be
+            rejected without overwriting their changes.
         </p>
         <button type="button" class="btn"
                 id="ec_cancel_edit">Cancel Editing</button>
@@ -1665,50 +1692,33 @@
             const csrfInput = document.querySelector(
                 '#ec_event_transport input[name="security_csrf_token"]'
             );
-            const key = "psp:peachpos:event-edit:" + editEventId;
             if (save) save.disabled = true;
             if (preview) preview.disabled = true;
             const heading = document.querySelector(".event-draft h1");
             if (heading) heading.textContent = "Edit Event #" + editEventId;
 
-            let editSession = null;
-            try {
-                editSession = JSON.parse(sessionStorage.getItem(key));
-            } catch (_error) {
-                editSession = null;
-            }
-
-            if (cancel) {
-                cancel.addEventListener("click", async function () {
-                    cancel.disabled = true;
-                    if (editSession && editSession.lock_token && csrfInput) {
-                        const release = new FormData();
-                        release.append("security_csrf_token", csrfInput.value);
-                        release.append("action", "release");
-                        release.append("lock_token", editSession.lock_token);
-                        try {
-                            await fetch("/events/" + editEventId + "/edit-lock", {
-                                method: "POST", credentials: "same-origin", body: release
-                            });
-                        } catch (_error) {
-                            // The server lease expires automatically.
-                        }
-                    }
-                    try { sessionStorage.removeItem(key); } catch (_error) {}
+            // Neither Back nor Cancel requires an editing lease.
+            const backLink = document.getElementById("ec_back_to_calendar");
+            if (backLink) {
+                backLink.addEventListener("click", function (event) {
+                    event.preventDefault();
                     window.location.assign("/events/calendar");
                 });
             }
-            if (!editSession || !editSession.lock_token || !csrfInput) {
-                status.textContent =
-                    "No active editing session found. Cancel and start from Event Details.";
+            if (cancel) {
+                cancel.addEventListener("click", function () {
+                    window.location.assign("/events/calendar");
+                });
+            }
+            if (!csrfInput || !csrfInput.value) {
+                status.textContent = "Security token unavailable. Reopen Edit Event.";
                 return;
             }
             try {
                 const body = new FormData();
                 body.append("security_csrf_token", csrfInput.value);
-                body.append("lock_token", editSession.lock_token);
                 const response = await fetch(
-                    "/events/" + editEventId + "/edit-data", {
+                    "/events/" + editEventId + "/edit-draft", {
                         method: "POST", credentials: "same-origin",
                         cache: "no-store", headers: {"Accept": "application/json"},
                         body: body
@@ -1719,10 +1729,13 @@
                 const draft = result && result.event;
                 if (result.ok !== true || !draft ||
                     draft.event_id !== editEventId ||
-                    draft.event_revision !== editSession.event_revision ||
+                    !Number.isSafeInteger(draft.event_revision) ||
+                    draft.event_revision < 1 ||
                     !draft.event || !Array.isArray(draft.days)) {
                     throw new Error("Event identity or revision mismatch.");
                 }
+                // The revision loaded here is sent unchanged on Save.
+                const loadedRevision = draft.event_revision;
                 const eventData = draft.event;
                 if (!parseDate(eventData.start_date) ||
                     !parseDate(eventData.end_date)) {
@@ -1830,62 +1843,14 @@
                 if (!editTransport || !save) {
                     throw new Error("Edit submit controls are unavailable.");
                 }
-                let sessionLost = false;
                 let saveInProgress = false;
                 let saveSucceeded = false;
-                let lastRenewalAt = 0;
-                let renewalPending = null;
+                let staleRevision = false;
                 let activityTimer = null;
                 let lastObservedPayload = JSON.stringify(collectEventPayload());
 
-                function disableExpiredSession(message) {
-                    sessionLost = true;
-                    save.disabled = true;
-                    status.textContent = message ||
-                        "The editing session could not be verified. " +
-                        "Cancel Editing and reopen the event before saving.";
-                }
-
-                async function renewAfterActualEdit() {
-                    if (sessionLost || saveInProgress || saveSucceeded) return;
-                    if (renewalPending) return renewalPending;
-                    if (Date.now() - lastRenewalAt < 60000) return;
-
-                    const renewalBody = new FormData();
-                    renewalBody.append("security_csrf_token", csrfInput.value);
-                    renewalBody.append("action", "renew");
-                    renewalBody.append("lock_token", editSession.lock_token);
-                    renewalPending = (async function () {
-                        const response = await fetch(
-                            "/events/" + editEventId + "/edit-lock", {
-                                method: "POST",
-                                credentials: "same-origin",
-                                cache: "no-store",
-                                headers: {"Accept": "application/json"},
-                                body: renewalBody
-                            }
-                        );
-                        const result = await response.json().catch(() => null);
-                        if (!response.ok || !result ||
-                            result.status !== "renewed" ||
-                            result.event_revision !== editSession.event_revision) {
-                            throw new Error("Editing lease renewal rejected.");
-                        }
-                        lastRenewalAt = Date.now();
-                    })();
-                    try {
-                        await renewalPending;
-                    } catch (_error) {
-                        disableExpiredSession();
-                    } finally {
-                        renewalPending = null;
-                    }
-                }
-
-                // Do not heartbeat. Renew only when an actual form payload
-                // has changed as a consequence of user interaction.
                 function checkChangedPayload() {
-                    if (sessionLost || saveInProgress || saveSucceeded) return;
+                    if (saveInProgress || saveSucceeded || staleRevision) return;
                     let current;
                     try {
                         current = JSON.stringify(collectEventPayload());
@@ -1896,12 +1861,11 @@
                     lastObservedPayload = current;
                     status.textContent =
                         "Unsaved changes to Event #" + editEventId + ".";
-                    void renewAfterActualEdit();
                 }
 
                 function watchEditingActivity(event) {
-                    if (event.isTrusted === false || sessionLost ||
-                        saveInProgress || saveSucceeded) return;
+                    if (event.isTrusted === false || saveInProgress ||
+                        saveSucceeded || staleRevision) return;
                     if (activityTimer !== null) clearTimeout(activityTimer);
                     activityTimer = setTimeout(function () {
                         activityTimer = null;
@@ -1914,15 +1878,11 @@
 
                 editTransport.addEventListener("submit", async function (event) {
                     event.preventDefault();
-                    if (sessionLost || saveInProgress || saveSucceeded) return;
+                    if (saveInProgress || saveSucceeded || staleRevision) return;
                     saveInProgress = true;
                     save.disabled = true;
                     save.textContent = "Saving Changes...";
                     try {
-                        if (renewalPending) await renewalPending;
-                        if (sessionLost) {
-                            throw new Error("Editing session could not be renewed.");
-                        }
                         const payload = collectEventPayload();
                         if (!payload || !Array.isArray(payload.days) ||
                             !payload.days.length) {
@@ -1935,10 +1895,9 @@
                         const body = new FormData();
                         body.append("security_csrf_token", csrfInput.value);
                         body.append("event_payload", serialized);
-                        body.append("lock_token", editSession.lock_token);
-                        body.append("expected_revision", String(editSession.event_revision));
+                        body.append("expected_revision", String(loadedRevision));
                         const response = await fetch(
-                            "/events/" + editEventId + "/edit-save", {
+                            "/events/" + editEventId + "/edit-save-unlocked", {
                                 method: "POST",
                                 credentials: "same-origin",
                                 cache: "no-store",
@@ -1947,6 +1906,17 @@
                             }
                         );
                         const result = await response.json().catch(() => null);
+                        if (response.status === 409 && result &&
+                            typeof result.error === "string" &&
+                            /changed|no longer available/i.test(result.error)) {
+                            staleRevision = true;
+                            status.textContent =
+                                "This event has changed since you opened it. " +
+                                "Your changes have NOT been saved and remain on " +
+                                "this page. Copy them before opening the latest event.";
+                            save.textContent = "Event Changed — Save Blocked";
+                            return;
+                        }
                         if (!response.ok || !result || result.saved !== true) {
                             throw new Error(
                                 result && result.error ||
@@ -1954,22 +1924,19 @@
                             );
                         }
                         if (result.event_id !== editEventId ||
-                            result.event_revision !== editSession.event_revision + 1) {
+                            result.event_revision !== loadedRevision + 1) {
                             throw new Error("The event save response did not match this edit.");
                         }
                         saveSucceeded = true;
-                        try { sessionStorage.removeItem(key); } catch (_error) {}
                         status.textContent =
                             "Event #" + editEventId + " saved successfully.";
                         window.location.assign("/events/calendar");
                     } catch (error) {
-                        if (!sessionLost) {
-                            status.textContent = error && error.message ||
-                                "Unable to save changes. Please try again.";
-                        }
+                        status.textContent = error && error.message ||
+                            "Unable to save changes. Please try again.";
                     } finally {
                         saveInProgress = false;
-                        if (!sessionLost && !saveSucceeded) {
+                        if (!staleRevision && !saveSucceeded) {
                             save.disabled = false;
                             save.textContent = "Save Changes";
                         }
@@ -1979,11 +1946,39 @@
                 status.textContent =
                     "Event #" + editEventId +
                     " loaded successfully. You can now save changes.";
+
+                // Audit display is optional, safely text-only, and read from
+                // the already protected Event Details API. Never send a user ID.
+                const historyTop = document.getElementById("ec_edit_history_top");
+                if (historyTop) {
+                    void (async function () {
+                        try {
+                            const historyResponse = await fetch(
+                                "/events/" + editEventId + "/details", {
+                                    method: "GET",
+                                    credentials: "same-origin",
+                                    cache: "no-store",
+                                    headers: {"Accept": "application/json"}
+                                }
+                            );
+                            if (!historyResponse.ok) return;
+                            const historyResult = await historyResponse.json();
+                            const savedEvent = historyResult && historyResult.event;
+                            if (historyResult.ok !== true || !savedEvent ||
+                                savedEvent.event_id !== editEventId ||
+                                typeof savedEvent.history_text !== "string" ||
+                                !savedEvent.history_text.trim()) return;
+                            historyTop.textContent = savedEvent.history_text;
+                            historyTop.hidden = false;
+                        } catch (_error) {
+                            // Audit display failure never prevents event editing.
+                        }
+                    })();
+                }
             } catch (_error) {
                 status.textContent =
-                    "Unable to load this event for editing. The session may " +
-                    "have expired or a saved resource may be unavailable. " +
-                    "Select Cancel Editing to return to the calendar.";
+                    "Unable to load this event for editing. A saved resource " +
+                    "may be unavailable. Select Cancel Editing to return.";
             }
         });
     }
