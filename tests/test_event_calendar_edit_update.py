@@ -379,7 +379,7 @@ class _EditTransactionCursor:
     def __init__(self):
         self.calls = []
         self.row = None
-        self.release_result = (12,)
+        self.current_revision = 1
 
     def __enter__(self):
         return self
@@ -389,10 +389,10 @@ class _EditTransactionCursor:
 
     def execute(self, sql, params=None):
         self.calls.append((sql, params))
-        if "SELECT timezone_name FROM public.spas" in sql:
+        if "SELECT event_revision FROM public.event_calendar_events" in sql:
+            self.row = (self.current_revision,)
+        elif "SELECT timezone_name FROM public.spas" in sql:
             self.row = ("America/Chicago",)
-        elif "DELETE FROM public.event_calendar_edit_locks" in sql:
-            self.row = self.release_result
         else:
             raise AssertionError("Unexpected SQL in mocked coordinator.")
 
@@ -444,7 +444,6 @@ class EventEditCoordinatorTests(unittest.TestCase):
         args = dict(
             spa_id=44, workspace_id=41, event_id=12,
             actor_id=34, actor_display_name="Jane Admin",
-            lock_token="d65f743f-343c-411c-8522-3caef1d00001",
             expected_revision=1,
         )
         args.update(overrides)
@@ -465,7 +464,6 @@ class EventEditCoordinatorTests(unittest.TestCase):
         mocks = {}
         for name, side_effect in (
             ("load_event_edit_payload", None),
-            ("require_event_edit_lock_for_save", spy("lock", 1)),
             ("validate_event_payload", spy("validate", normalized_fixture())),
             ("validate_event_resource_ownership", spy("ownership")),
             ("validate_existing_event_availability", spy("availability")),
@@ -496,7 +494,7 @@ class EventEditCoordinatorTests(unittest.TestCase):
             self.assertEqual(result["history_id"], 55)
             self.assertEqual(conn.commits, 1)
             self.assertEqual(conn.rollbacks, 0)
-            for stage in ("lock", "validate", "ownership", "availability",
+            for stage in ("validate", "ownership", "availability",
                           "header", "delete", "schedules", "custom", "history"):
                 self.assertIn(stage, order)
             self.assertLess(order.index("ownership"), order.index("delete"))
@@ -508,24 +506,25 @@ class EventEditCoordinatorTests(unittest.TestCase):
                 mocks["validate_existing_event_availability"].call_args.kwargs,
                 {"excluded_event": (41, 12)},
             )
-            release_sql, release_params = conn.cur.calls[-1]
-            self.assertIn("DELETE FROM public.event_calendar_edit_locks", release_sql)
-            self.assertIn("expires_at > clock_timestamp()", release_sql)
-            self.assertEqual(release_params[:4], (44, 41, 12, 34))
+            self.assertTrue(conn.cur.calls)
+            row_guard_sql, row_guard_params = conn.cur.calls[0]
+            self.assertIn("SELECT event_revision", row_guard_sql)
+            self.assertIn("FOR UPDATE", row_guard_sql)
+            self.assertEqual(row_guard_params, (44, 41, 12))
+            self.assertFalse(any("event_calendar_edit_locks" in sql
+                                 for sql, _ in conn.cur.calls))
 
-    def test_stale_lease_rolls_back_before_other_work(self):
-        from services.event_calendar_edit_locks import EventEditLockConflict
+    def test_stale_revision_rolls_back_before_other_work(self):
         conn = _EditTransactionConnection()
+        conn.cur.current_revision = 2
         with ExitStack() as stack:
             mocks, _ = self._mock_dependencies(stack)
-            mocks["require_event_edit_lock_for_save"].side_effect = (
-                EventEditLockConflict("Expired")
-            )
-            with self.assertRaises(EventEditUpdateConflict):
+            with self.assertRaisesRegex(EventEditUpdateConflict, "has changed"):
                 self._run(conn)
             self.assertEqual(conn.commits, 0)
             self.assertEqual(conn.rollbacks, 1)
             mocks["load_event_edit_payload"].assert_not_called()
+            self.assertEqual(len(conn.cur.calls), 1)
 
     def test_stale_revision_from_snapshot_rolls_back(self):
         conn = _EditTransactionConnection()
@@ -588,15 +587,15 @@ class EventEditCoordinatorTests(unittest.TestCase):
             self.assertEqual(conn.rollbacks, 1)
             self.assertEqual(conn.commits, 0)
 
-    def test_expired_lease_at_completion_rolls_back_everything(self):
+    def test_success_has_no_lease_writes(self):
         conn = _EditTransactionConnection()
-        conn.cur.release_result = None
         with ExitStack() as stack:
             self._mock_dependencies(stack)
-            with self.assertRaises(EventEditUpdateConflict):
-                self._run(conn)
-            self.assertEqual(conn.rollbacks, 1)
-            self.assertEqual(conn.commits, 0)
+            result = self._run(conn)
+            self.assertEqual(result["revision_after"], 2)
+            self.assertEqual(conn.commits, 1)
+            self.assertFalse(any("event_calendar_edit_locks" in sql
+                                 for sql, _ in conn.cur.calls))
 
     def test_no_real_changes_rollback_instead_of_logging(self):
         conn = _EditTransactionConnection()

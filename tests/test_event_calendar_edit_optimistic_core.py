@@ -110,14 +110,12 @@ class NoLeaseCoordinatorTests(unittest.TestCase):
             stack.enter_context(patch(target + "_create_schedules", return_value={"operating_days": 1}))
             stack.enter_context(patch(target + "_create_custom_values", return_value=0))
             history = stack.enter_context(patch(target + "_append_event_edit_history", return_value=33))
-            lease = stack.enter_context(patch(target + "require_event_edit_lock_for_save"))
             result = update_event_draft(
                 conn, {"event": {}},
                 spa_id=44, workspace_id=41, event_id=12,
                 actor_id=34, actor_display_name="Jane Administrator",
                 expected_revision=override_revision,  # No lock token!
             )
-            lease.assert_not_called()
             history.assert_called_once()
             return result
 
