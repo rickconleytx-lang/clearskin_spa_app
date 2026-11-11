@@ -35,9 +35,11 @@ class EventEditUITests(unittest.TestCase):
         self.assertIn('if (!isEditMode && transport && saveButton', self.form)
         self.assertIn('action="{% if event_edit_id %}#', self.form)
 
-    def test_save_changes_disabled(self):
-        self.assertIn('Save Changes (Not Yet Available)', self.form)
+    def test_edit_save_stays_disabled_until_verified_prefill(self):
+        self.assertIn("{{ 'Save Changes' if event_edit_id else 'Save Event' }}", self.form)
         self.assertIn('{% if event_edit_id %}disabled{% endif %}', self.form)
+        self.assertIn('save.disabled = true;', self.form)
+        self.assertIn('save.disabled = false;', self.form)
 
     def test_daily_values_prefilled(self):
         self.assertIn('dailyValues.clear();', self.form)

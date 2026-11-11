@@ -738,8 +738,8 @@
             Loading your saved event...
         </p>
         <p class="ec-note">
-            Save Changes will be available once the protected update
-            service has been tested.
+            Changes update this event in place. Another administrator
+            cannot edit it while your editing session is active.
         </p>
         <button type="button" class="btn"
                 id="ec_cancel_edit">Cancel Editing</button>
@@ -766,7 +766,7 @@
                 type="submit"
                 id="ec_save_event"
                   {% if event_edit_id %}disabled{% endif %}>
-            {{ 'Save Changes (Not Yet Available)' if event_edit_id else 'Save Event' }}
+            {{ 'Save Changes' if event_edit_id else 'Save Event' }}
         </button>
     </form>
 
@@ -1825,9 +1825,160 @@
                     dailyValues.set(date, value);
                 }
                 renderDays();
+                // Only install Edit Save after the protected read and prefill succeed.
+                const editTransport = document.getElementById("ec_event_transport");
+                if (!editTransport || !save) {
+                    throw new Error("Edit submit controls are unavailable.");
+                }
+                let sessionLost = false;
+                let saveInProgress = false;
+                let saveSucceeded = false;
+                let lastRenewalAt = 0;
+                let renewalPending = null;
+                let activityTimer = null;
+                let lastObservedPayload = JSON.stringify(collectEventPayload());
+
+                function disableExpiredSession(message) {
+                    sessionLost = true;
+                    save.disabled = true;
+                    status.textContent = message ||
+                        "The editing session could not be verified. " +
+                        "Cancel Editing and reopen the event before saving.";
+                }
+
+                async function renewAfterActualEdit() {
+                    if (sessionLost || saveInProgress || saveSucceeded) return;
+                    if (renewalPending) return renewalPending;
+                    if (Date.now() - lastRenewalAt < 60000) return;
+
+                    const renewalBody = new FormData();
+                    renewalBody.append("security_csrf_token", csrfInput.value);
+                    renewalBody.append("action", "renew");
+                    renewalBody.append("lock_token", editSession.lock_token);
+                    renewalPending = (async function () {
+                        const response = await fetch(
+                            "/events/" + editEventId + "/edit-lock", {
+                                method: "POST",
+                                credentials: "same-origin",
+                                cache: "no-store",
+                                headers: {"Accept": "application/json"},
+                                body: renewalBody
+                            }
+                        );
+                        const result = await response.json().catch(() => null);
+                        if (!response.ok || !result ||
+                            result.status !== "renewed" ||
+                            result.event_revision !== editSession.event_revision) {
+                            throw new Error("Editing lease renewal rejected.");
+                        }
+                        lastRenewalAt = Date.now();
+                    })();
+                    try {
+                        await renewalPending;
+                    } catch (_error) {
+                        disableExpiredSession();
+                    } finally {
+                        renewalPending = null;
+                    }
+                }
+
+                // Do not heartbeat. Renew only when an actual form payload
+                // has changed as a consequence of user interaction.
+                function checkChangedPayload() {
+                    if (sessionLost || saveInProgress || saveSucceeded) return;
+                    let current;
+                    try {
+                        current = JSON.stringify(collectEventPayload());
+                    } catch (_error) {
+                        return;
+                    }
+                    if (current === lastObservedPayload) return;
+                    lastObservedPayload = current;
+                    status.textContent =
+                        "Unsaved changes to Event #" + editEventId + ".";
+                    void renewAfterActualEdit();
+                }
+
+                function watchEditingActivity(event) {
+                    if (event.isTrusted === false || sessionLost ||
+                        saveInProgress || saveSucceeded) return;
+                    if (activityTimer !== null) clearTimeout(activityTimer);
+                    activityTimer = setTimeout(function () {
+                        activityTimer = null;
+                        checkChangedPayload();
+                    }, 200);
+                }
+                document.addEventListener("input", watchEditingActivity, true);
+                document.addEventListener("change", watchEditingActivity, true);
+                document.addEventListener("click", watchEditingActivity, true);
+
+                editTransport.addEventListener("submit", async function (event) {
+                    event.preventDefault();
+                    if (sessionLost || saveInProgress || saveSucceeded) return;
+                    saveInProgress = true;
+                    save.disabled = true;
+                    save.textContent = "Saving Changes...";
+                    try {
+                        if (renewalPending) await renewalPending;
+                        if (sessionLost) {
+                            throw new Error("Editing session could not be renewed.");
+                        }
+                        const payload = collectEventPayload();
+                        if (!payload || !Array.isArray(payload.days) ||
+                            !payload.days.length) {
+                            throw new Error("Select valid operating days before saving.");
+                        }
+                        const serialized = JSON.stringify(payload);
+                        if (serialized.length > 500000) {
+                            throw new Error("Event data exceeds the save limit.");
+                        }
+                        const body = new FormData();
+                        body.append("security_csrf_token", csrfInput.value);
+                        body.append("event_payload", serialized);
+                        body.append("lock_token", editSession.lock_token);
+                        body.append("expected_revision", String(editSession.event_revision));
+                        const response = await fetch(
+                            "/events/" + editEventId + "/edit-save", {
+                                method: "POST",
+                                credentials: "same-origin",
+                                cache: "no-store",
+                                headers: {"Accept": "application/json"},
+                                body
+                            }
+                        );
+                        const result = await response.json().catch(() => null);
+                        if (!response.ok || !result || result.saved !== true) {
+                            throw new Error(
+                                result && result.error ||
+                                "Could not save this event. Check the data and try again."
+                            );
+                        }
+                        if (result.event_id !== editEventId ||
+                            result.event_revision !== editSession.event_revision + 1) {
+                            throw new Error("The event save response did not match this edit.");
+                        }
+                        saveSucceeded = true;
+                        try { sessionStorage.removeItem(key); } catch (_error) {}
+                        status.textContent =
+                            "Event #" + editEventId + " saved successfully.";
+                        window.location.assign("/events/calendar");
+                    } catch (error) {
+                        if (!sessionLost) {
+                            status.textContent = error && error.message ||
+                                "Unable to save changes. Please try again.";
+                        }
+                    } finally {
+                        saveInProgress = false;
+                        if (!sessionLost && !saveSucceeded) {
+                            save.disabled = false;
+                            save.textContent = "Save Changes";
+                        }
+                    }
+                });
+                save.disabled = false;
                 status.textContent =
                     "Event #" + editEventId +
-                    " loaded successfully. Save Changes is not yet available.";
+                    " loaded successfully. You can now save changes.";
             } catch (_error) {
                 status.textContent =
                     "Unable to load this event for editing. The session may " +
