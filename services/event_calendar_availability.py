@@ -70,7 +70,9 @@ def _proposed_intervals(normalized):
     return equipment, employees
 
 
-def _check_saved_intervals(cursor, sql, groups, spa_id, label):
+def _check_saved_intervals(
+    cursor, sql, groups, spa_id, label, *, excluded_event=None
+):
     if not groups:
         return 0
 
@@ -83,10 +85,21 @@ def _check_saved_intervals(cursor, sql, groups, spa_id, label):
     earliest = min(start for start, _ in intervals)
     latest = max(end for _, end in intervals)
 
-    cursor.execute(
-        sql,
-        (spa_id, sorted(groups), latest, earliest),
-    )
+    params = (spa_id, sorted(groups), latest, earliest)
+
+    if excluded_event is not None:
+        workspace_id, event_id = excluded_event
+
+        # Exclude ONLY the specific event within its workspace.
+        # Other events in this business remain conflict candidates.
+        sql += """
+            AND NOT (
+                business_unit_id = %s AND event_id = %s
+            )
+        """
+        params += (workspace_id, event_id)
+
+    cursor.execute(sql, params)
 
     examined = 0
 
@@ -112,7 +125,7 @@ def _check_saved_intervals(cursor, sql, groups, spa_id, label):
 
 
 def validate_existing_event_availability(
-    cursor, normalized, spa_id
+    cursor, normalized, spa_id, *, excluded_event=None
 ):
     """Check existing ACTIVE reservations across the business.
 
@@ -125,6 +138,19 @@ def validate_existing_event_availability(
 
     if type(spa_id) is not int or spa_id <= 0:
         raise EventAvailabilityError("Invalid business scope.")
+
+    if excluded_event is not None:
+        if (
+            type(excluded_event) is not tuple
+            or len(excluded_event) != 2
+            or any(
+                type(value) is not int or value <= 0
+                for value in excluded_event
+            )
+        ):
+            raise EventAvailabilityError(
+                "Invalid editing event exclusion."
+            )
 
     equipment, employees = _proposed_intervals(normalized)
 
@@ -153,11 +179,13 @@ def validate_existing_event_availability(
     """
 
     units_examined = _check_saved_intervals(
-        cursor, unit_sql, equipment, spa_id, "Equipment"
+        cursor, unit_sql, equipment, spa_id, "Equipment",
+        excluded_event=excluded_event,
     )
 
     shifts_examined = _check_saved_intervals(
-        cursor, employee_sql, employees, spa_id, "Employee"
+        cursor, employee_sql, employees, spa_id, "Employee",
+        excluded_event=excluded_event,
     )
 
     return {
