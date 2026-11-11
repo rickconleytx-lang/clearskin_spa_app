@@ -130179,6 +130179,7 @@ def peachpos_event_calendar_month():
     return render_template(
         "event_calendar_month.html",
         calendar=calendar_data,
+        event_csrf_token=_security_form_csrf_token(),
     )
 
 
@@ -130786,6 +130787,21 @@ def peachpos_event_edit_data(event_id):
 @require_subscription_feature("event_calendar")
 @require_workspace_permission("can_manage_event_units")
 def event_new():
+    # Edit data requires a separate POST with CSRF and active lease.
+    edit_raw = request.args.get("edit")
+    edit_event_id = None
+
+    if edit_raw is not None:
+        if (
+            not edit_raw.isascii()
+            or not edit_raw.isdecimal()
+            or len(edit_raw) > 18
+        ):
+            abort(404)
+
+        edit_event_id = int(edit_raw)
+        if edit_event_id <= 0:
+            abort(404)
 
     # Initial development preview: Business Administrators only.
     # A dedicated event-management permission will be reviewed
@@ -130894,6 +130910,7 @@ def event_new():
         available_event_units=units,
         available_event_employees=event_employees,
         event_csrf_token=_security_form_csrf_token(),
+        event_edit_id=edit_event_id,
     )
 
 

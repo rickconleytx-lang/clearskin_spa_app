@@ -1,6 +1,6 @@
 
 {% extends "base.html" %}
-{% block title %}Add Event{% endblock %}
+{% block title %}{{ 'Edit Event' if event_edit_id else 'Add Event' }}{% endblock %}
 
 {% block content %}
 
@@ -731,9 +731,24 @@
         Availability will be checked again before saving.
     </p>
 
+    {% if event_edit_id %}
+    <section class="ec-card" id="ec-edit-mode-panel">
+        <h2>Edit Event #{{ event_edit_id }}</h2>
+        <p id="ec_edit_status" role="status" aria-live="polite">
+            Loading your saved event...
+        </p>
+        <p class="ec-note">
+            Save Changes will be available once the protected update
+            service has been tested.
+        </p>
+        <button type="button" class="btn"
+                id="ec_cancel_edit">Cancel Editing</button>
+    </section>
+    {% endif %}
+
     <form id="ec_event_transport"
           method="POST"
-          action="{{ url_for('save_peachpos_event') }}">
+          action="{% if event_edit_id %}#{% else %}{{ url_for('save_peachpos_event') }}{% endif %}">
 
         <input type="hidden"
                name="security_csrf_token"
@@ -749,8 +764,9 @@
 
         <button class="btn"
                 type="submit"
-                id="ec_save_event">
-            Save Event
+                id="ec_save_event"
+                  {% if event_edit_id %}disabled{% endif %}>
+            {{ 'Save Changes (Not Yet Available)' if event_edit_id else 'Save Event' }}
         </button>
     </form>
 
@@ -766,6 +782,9 @@
 <script>
 (function () {
     "use strict";
+
+    const editEventId = {{ event_edit_id | tojson }};
+    const isEditMode = Number.isSafeInteger(editEventId) && editEventId > 0;
 
     const startInput = document.getElementById("start_date");
     const endInput = document.getElementById("end_date");
@@ -1636,8 +1655,191 @@
     startInput.addEventListener("change", renderDays);
     endInput.addEventListener("change", renderDays);
 
+
+    if (isEditMode) {
+        window.addEventListener("load", async function () {
+            const status = document.getElementById("ec_edit_status");
+            const cancel = document.getElementById("ec_cancel_edit");
+            const save = document.getElementById("ec_save_event");
+            const preview = document.getElementById("ec_preview_payload");
+            const csrfInput = document.querySelector(
+                '#ec_event_transport input[name="security_csrf_token"]'
+            );
+            const key = "psp:peachpos:event-edit:" + editEventId;
+            if (save) save.disabled = true;
+            if (preview) preview.disabled = true;
+            const heading = document.querySelector(".event-draft h1");
+            if (heading) heading.textContent = "Edit Event #" + editEventId;
+
+            let editSession = null;
+            try {
+                editSession = JSON.parse(sessionStorage.getItem(key));
+            } catch (_error) {
+                editSession = null;
+            }
+
+            if (cancel) {
+                cancel.addEventListener("click", async function () {
+                    cancel.disabled = true;
+                    if (editSession && editSession.lock_token && csrfInput) {
+                        const release = new FormData();
+                        release.append("security_csrf_token", csrfInput.value);
+                        release.append("action", "release");
+                        release.append("lock_token", editSession.lock_token);
+                        try {
+                            await fetch("/events/" + editEventId + "/edit-lock", {
+                                method: "POST", credentials: "same-origin", body: release
+                            });
+                        } catch (_error) {
+                            // The server lease expires automatically.
+                        }
+                    }
+                    try { sessionStorage.removeItem(key); } catch (_error) {}
+                    window.location.assign("/events/calendar");
+                });
+            }
+            if (!editSession || !editSession.lock_token || !csrfInput) {
+                status.textContent =
+                    "No active editing session found. Cancel and start from Event Details.";
+                return;
+            }
+            try {
+                const body = new FormData();
+                body.append("security_csrf_token", csrfInput.value);
+                body.append("lock_token", editSession.lock_token);
+                const response = await fetch(
+                    "/events/" + editEventId + "/edit-data", {
+                        method: "POST", credentials: "same-origin",
+                        cache: "no-store", headers: {"Accept": "application/json"},
+                        body: body
+                    }
+                );
+                if (!response.ok) throw new Error("Edit data rejected.");
+                const result = await response.json();
+                const draft = result && result.event;
+                if (result.ok !== true || !draft ||
+                    draft.event_id !== editEventId ||
+                    draft.event_revision !== editSession.event_revision ||
+                    !draft.event || !Array.isArray(draft.days)) {
+                    throw new Error("Event identity or revision mismatch.");
+                }
+                const eventData = draft.event;
+                if (!parseDate(eventData.start_date) ||
+                    !parseDate(eventData.end_date)) {
+                    throw new Error("Invalid saved dates.");
+                }
+
+                const availableUnitIds = new Set(
+                    Array.from(
+                        equipmentTemplate.content.querySelectorAll(
+                            "input[data-event-unit-id]"
+                        ), input => String(input.dataset.eventUnitId)
+                    )
+                );
+                const availableEmployeeIds = new Set(
+                    Array.from(
+                        shiftTemplate.content.querySelectorAll(
+                            '[data-shift-field="employeeId"] option'
+                        ), option => String(option.value)
+                    ).filter(Boolean)
+                );
+                const prepared = new Map();
+                for (const day of draft.days) {
+                    if (!parseDate(day.date) || prepared.has(day.date) ||
+                        !Array.isArray(day.equipment_ids) ||
+                        !Array.isArray(day.shifts)) {
+                        throw new Error("Invalid saved operating day.");
+                    }
+                    const equipmentIds = day.equipment_ids.map(String);
+                    if (equipmentIds.some(id => !availableUnitIds.has(id))) {
+                        throw new Error("Previously assigned equipment unavailable.");
+                    }
+                    const shifts = day.shifts.map(function (shift) {
+                        const employeeId = String(shift.employee_id);
+                        const unitId = shift.equipment_id == null
+                            ? "" : String(shift.equipment_id);
+                        if (!availableEmployeeIds.has(employeeId)) {
+                            throw new Error("Previously assigned employee unavailable.");
+                        }
+                        return {
+                            employeeId, start: shift.starts || "",
+                            end: shift.ends || "",
+                            overnight: Boolean(shift.ends_next_day),
+                            unitId, role: shift.role || "", notes: shift.notes || ""
+                        };
+                    });
+                    prepared.set(day.date, {
+                        operating: Boolean(day.operating),
+                        open: day.opens || "", close: day.closes || "",
+                        setup: day.setup || "", breakdown: day.breakdown || "",
+                        overnight: Boolean(day.closes_next_day),
+                        notes: day.notes || "", equipmentIds, shifts
+                    });
+                }
+
+                const fields = {
+                    event_name: eventData.name,
+                    start_date: eventData.start_date,
+                    end_date: eventData.end_date,
+                    venue_name: eventData.venue_name,
+                    street_address: eventData.street_address,
+                    address_line2: eventData.address_line2,
+                    city: eventData.city, county: eventData.county,
+                    state: eventData.state, zip_code: eventData.zip_code,
+                    parking_setup_location: eventData.parking_setup_location,
+                    contact_name: eventData.contact_name,
+                    contact_phone: eventData.contact_phone,
+                    contact_email: eventData.contact_email,
+                    public_description: eventData.public_description,
+                    notes_1: eventData.notes_1, notes_2: eventData.notes_2
+                };
+                for (const [id, value] of Object.entries(fields)) {
+                    const input = document.getElementById(id);
+                    if (!input) throw new Error("Required form field missing.");
+                    input.value = value == null ? "" : String(value);
+                }
+                const statusSelect = document.getElementById("event_status");
+                const selectedStatus = Array.from(statusSelect.options).find(
+                    option => option.value.toLowerCase() ===
+                        String(eventData.status).toLowerCase()
+                );
+                if (!selectedStatus) throw new Error("Unknown event status.");
+                statusSelect.value = selectedStatus.value;
+                document.getElementById("include_on_peachweb").checked =
+                    Boolean(eventData.include_on_peachweb);
+                document.getElementById("permits_obtained").checked =
+                    Boolean(eventData.permits_obtained);
+                for (const slot of ["1", "2", "3"]) {
+                    document.getElementById("custom_" + slot).value =
+                        String((draft.custom_values || {})[slot] || "");
+                    const savedLabel = (draft.custom_labels || {})[slot];
+                    if (savedLabel) {
+                        const label = document.querySelector(
+                            'label[for="custom_' + slot + '"]'
+                        );
+                        if (label) label.textContent = savedLabel;
+                    }
+                }
+                dailyValues.clear();
+                for (const [date, value] of prepared) {
+                    dailyValues.set(date, value);
+                }
+                renderDays();
+                status.textContent =
+                    "Event #" + editEventId +
+                    " loaded successfully. Save Changes is not yet available.";
+            } catch (_error) {
+                status.textContent =
+                    "Unable to load this event for editing. The session may " +
+                    "have expired or a saved resource may be unavailable. " +
+                    "Select Cancel Editing to return to the calendar.";
+            }
+        });
+    }
+
     // EC-060-8: Calendar day-number quick add.
     window.addEventListener("load", function () {
+        if (isEditMode) return;
         const requestedDate =
             new URLSearchParams(window.location.search).get("date");
 
@@ -2275,7 +2477,7 @@
         return data;
     }
 
-    if (transport && saveButton && submissionInput &&
+    if (!isEditMode && transport && saveButton && submissionInput &&
         payloadInput && payloadSummary && previewButton) {
 
         transport.addEventListener("submit", async function (event) {

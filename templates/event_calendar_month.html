@@ -294,6 +294,7 @@
                         {% for item in day.entries %}
                             <button type="button" class="ec-month-event"
                                  data-details-url="{{ url_for('peachpos_event_calendar_details', event_id=item.event_id) }}"
+                                    data-edit-lock-url="{{ url_for('peachpos_event_edit_lock', event_id=item.event_id) }}"
                                  style="background-color: {{ item.color }};
                                         color: {{ item.text_color }};"
                                  title="{{ item.name }} — {{ item.unit }} — {{ item.hours }}">
@@ -337,7 +338,14 @@
         <div id="ec-detail-content"
              class="ec-detail-content"
              aria-live="polite"></div>
+        <p id="ec-detail-edit-message"
+           class="ec-detail-subtitle"
+           role="status" aria-live="polite"></p>
+        <input type="hidden" id="ec-calendar-edit-csrf"
+               value="{{ event_csrf_token }}">
         <div class="ec-detail-footer">
+            <button type="button" id="ec-detail-edit"
+                    class="btn" hidden>Edit Event</button>
             <button type="button"
                     id="ec-detail-close"
                     class="btn ec-detail-close">
@@ -358,6 +366,12 @@
     const subtitle = document.getElementById("ec-detail-subtitle");
     const content = document.getElementById("ec-detail-content");
     const closeButton = document.getElementById("ec-detail-close");
+    const editButton = document.getElementById("ec-detail-edit");
+    const editMessage = document.getElementById("ec-detail-edit-message");
+    const editCsrf = document.getElementById("ec-calendar-edit-csrf");
+    let activeEventButton = null;
+    let activeEventId = null;
+    let editInProgress = false;
 
     let currentRequest = 0;
     let previousFocus = null;
@@ -543,6 +557,10 @@
 
     async function openDetails(button) {
         previousFocus = button;
+        activeEventButton = null;
+        activeEventId = null;
+        editButton.hidden = true;
+        editMessage.textContent = "";
         const requestNumber = ++currentRequest;
 
         heading.textContent = "Event Details";
@@ -578,6 +596,13 @@
 
             if (requestNumber === currentRequest && dialog.open) {
                 renderDetails(payload.event);
+                const eventId = Number(payload.event && payload.event.event_id);
+                if (Number.isSafeInteger(eventId) && eventId > 0 &&
+                    button.dataset.editLockUrl) {
+                    activeEventButton = button;
+                    activeEventId = eventId;
+                    editButton.hidden = false;
+                }
             }
         } catch (_error) {
             if (requestNumber === currentRequest && dialog.open) {
@@ -599,6 +624,78 @@
         button.addEventListener("click", function () {
             openDetails(button);
         });
+    });
+
+
+    editButton.addEventListener("click", async function () {
+        if (editInProgress || !activeEventButton ||
+            !activeEventId || !dialog.open) return;
+
+        editInProgress = true;
+        editButton.disabled = true;
+        closeButton.disabled = true;
+        editMessage.textContent = "Opening editing session...";
+
+        const eventId = activeEventId;
+        const lockUrl = activeEventButton.dataset.editLockUrl;
+        const csrf = editCsrf.value;
+        try {
+            if (!csrf) throw new Error("Security token unavailable.");
+            const data = new FormData();
+            data.append("security_csrf_token", csrf);
+            data.append("action", "acquire");
+            const response = await fetch(lockUrl, {
+                method: "POST", credentials: "same-origin",
+                cache: "no-store", headers: {"Accept": "application/json"},
+                body: data
+            });
+            const result = await response.json();
+            if (response.status === 409 && result.status === "busy") {
+                const editor = result.editor_display_name ||
+                    result.editor_name || "another administrator";
+                editMessage.textContent =
+                    "This event is currently being edited by " + String(editor) + ".";
+                return;
+            }
+            if (!response.ok || result.status !== "acquired" ||
+                typeof result.lock_token !== "string" ||
+                !Number.isSafeInteger(result.event_revision)) {
+                throw new Error("Could not acquire editing session.");
+            }
+            const key = "psp:peachpos:event-edit:" + eventId;
+            try {
+                sessionStorage.setItem(key, JSON.stringify({
+                    lock_token: result.lock_token,
+                    event_revision: result.event_revision
+                }));
+            } catch (_storageError) {
+                const release = new FormData();
+                release.append("security_csrf_token", csrf);
+                release.append("action", "release");
+                release.append("lock_token", result.lock_token);
+                try {
+                    await fetch(lockUrl, {
+                        method: "POST", credentials: "same-origin", body: release
+                    });
+                } catch (_releaseError) {
+                    // The server lease expires automatically.
+                }
+                throw new Error("Session storage unavailable.");
+            }
+            const editUrl = new URL(
+                "{{ url_for('event_new') }}", window.location.href
+            );
+            // Only event ID in URL; private editing token stays in tab storage.
+            editUrl.searchParams.set("edit", String(eventId));
+            window.location.assign(editUrl.href);
+        } catch (_error) {
+            editMessage.textContent =
+                "Unable to open the editing session. Please try again.";
+        } finally {
+            editInProgress = false;
+            editButton.disabled = false;
+            closeButton.disabled = false;
+        }
     });
 
     closeButton.addEventListener("click", function () {
