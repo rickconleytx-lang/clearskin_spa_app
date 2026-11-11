@@ -217,6 +217,20 @@
 .event-draft .ec-staffing-coverage p {
     margin: 5px 0;
 }
+/* Copy Event: date-choice control matches the other full-height form fields. */
+.event-draft #ec-copy-date-mode {
+    min-height: 42px;
+    padding: 9px 12px;
+    border: 1px solid #d9dadd;
+    border-radius: 8px;
+    background-color: #fff;
+    font: inherit;
+}
+/* Safari may display an example date in a genuinely empty date input.
+   Hide only that placeholder text; a selected date stays visible. */
+.event-draft #ec-copy-end.ec-copy-end-empty:not(:focus)::-webkit-datetime-edit {
+    color: transparent;
+}
 /* Edit mode only: quiet, clearly separated audit banner. */
 .event-draft .ec-edit-history-top {
     background: #F8F0EA;
@@ -291,9 +305,12 @@
             </div>
             <div class="ec-field">
                 <label for="ec-copy-end">New End Date (optional)</label>
-                <input type="date" id="ec-copy-end">
+                <input type="date" id="ec-copy-end" autocomplete="off"
+                       aria-describedby="ec-copy-end-help">
+                <small class="ec-note" id="ec-copy-end-help">Leave empty to keep the original number of days.</small>
             </div>
-            <p class="ec-note ec-wide">Leave the end date blank to preserve the original event's number of days. Extended dates start as non-operating and can be configured below.</p>
+            <p class="ec-note ec-wide">If you leave New End Date empty, PeachPOS calculates it from the original event's length. Any extra dates you add start as non-operating and can be configured below.</p>
+            <p class="ec-note ec-wide" id="ec-copy-calculated-end" role="status" aria-live="polite">The calculated end date will appear after Prepare Copy.</p>
         </div>
         <p style="margin-top:16px;">
             <button type="button" class="btn" id="ec-prepare-copy">Prepare Copy</button>
@@ -1749,6 +1766,7 @@
             const customDates = document.getElementById("ec-copy-custom-dates");
             const copyStart = document.getElementById("ec-copy-start");
             const copyEnd = document.getElementById("ec-copy-end");
+            const calculatedEnd = document.getElementById("ec-copy-calculated-end");
             const save = document.getElementById("ec_save_event");
             const preview = document.getElementById("ec_preview_payload");
             const csrf = document.querySelector(
@@ -1762,13 +1780,22 @@
             }
             if (preview) preview.disabled = true;
             if (!panel || !prepare || !status || !save || !preview ||
-                !dateMode || !csrf || !csrf.value || !customDates) {
+                !dateMode || !csrf || !csrf.value || !customDates ||
+                !copyStart || !copyEnd || !calculatedEnd) {
                 return;
             }
+            function syncEmptyEndField() {
+                copyEnd.classList.toggle("ec-copy-end-empty", !copyEnd.value);
+            }
+            syncEmptyEndField();
+            copyEnd.addEventListener("input", syncEmptyEndField);
+            copyEnd.addEventListener("change", syncEmptyEndField);
             function invalidateCopy() {
                 copyDraftReady = false;
                 save.disabled = true;
                 preview.disabled = true;
+                calculatedEnd.textContent =
+                    "The calculated end date will appear after Prepare Copy.";
                 status.textContent = "Copy options changed. Select Prepare Copy again to apply them.";
             }
             dateMode.addEventListener("change", function () {
@@ -1919,6 +1946,17 @@
                     dailyValues.clear();
                     for (const [date, state] of prepared) dailyValues.set(date, state);
                     renderDays();
+                    // The server constructs the end date after shifting the original
+                    // event span, or uses the custom override if provided.
+                    // Never guess a multi-day duration from browser-local dates.
+                    const preparedEnd = parseDate(eventData.end_date);
+                    calculatedEnd.textContent = preparedEnd
+                        ? "New event ends: " + dateFormatter.format(preparedEnd) +
+                          (dateMode.value === "custom" && !copyEnd.value
+                              ? " (calculated automatically)"
+                              : " (selected copy dates)")
+                        : "Review the new event end date in Event Information.";
+                    syncEmptyEndField();
                     // This remains Create Event: no original event ID or revision
                     // is ever sent to the save endpoint.
                     copyDraftReady = true;
