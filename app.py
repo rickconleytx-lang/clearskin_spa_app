@@ -130667,6 +130667,119 @@ def peachpos_event_edit_lock(event_id):
         conn.close()
 
 
+# ==========================================================
+# PeachPOS Event Calendar — protected editable event data
+# ==========================================================
+
+@app.route("/events/<int:event_id>/edit-data", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_edit_data(event_id):
+    from flask import jsonify
+    from services.event_calendar_edit_locks import (
+        EventEditLockError,
+        EventEditLockConflict,
+        require_event_edit_lock_for_read,
+    )
+    from services.event_calendar_edit_read import (
+        EventEditReadError,
+        load_event_edit_payload,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    if event_id <= 0:
+        abort(404)
+
+    if (
+        request.content_length is not None
+        and request.content_length > 8192
+    ):
+        abort(413)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    token = request.form.get("lock_token")
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    def respond(payload, status=200):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response, status
+
+    conn = get_db_connection()
+
+    try:
+        # The lock check and full event read share one
+        # consistent, read-only database transaction.
+        conn.set_session(
+            readonly=True,
+            isolation_level="REPEATABLE READ",
+            autocommit=False,
+        )
+
+        with conn.cursor() as cur:
+            revision = require_event_edit_lock_for_read(
+                cur,
+                spa_id=spa_id,
+                workspace_id=workspace_id,
+                event_id=event_id,
+                actor_id=actor_id,
+                lock_token=token,
+            )
+
+        draft = load_event_edit_payload(
+            conn,
+            event_id=event_id,
+            spa_id=spa_id,
+            workspace_id=workspace_id,
+        )
+
+        if draft is None:
+            return respond({"status": "not_found"}, 404)
+
+        if draft["event_revision"] != revision:
+            return respond({"status": "conflict"}, 409)
+
+        return respond({
+            "ok": True,
+            "event": draft,
+        })
+
+    except EventEditLockConflict:
+        return respond({
+            "status": "lost",
+            "message": "Your editing session is no longer valid.",
+        }, 409)
+
+    except EventEditLockError:
+        return respond({
+            "error": "Invalid editing session.",
+        }, 400)
+
+    except EventEditReadError:
+        return respond({
+            "status": "unavailable",
+            "message": "This saved event cannot be opened for editing.",
+        }, 409)
+
+    finally:
+        # Read-only request: never commit or renew the lease.
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+
 @app.route("/events/add", methods=["GET"])
 @login_required
 @spa_required

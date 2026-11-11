@@ -318,3 +318,62 @@ def require_event_edit_lock_for_save(
         )
 
     return revision
+
+
+def require_event_edit_lock_for_read(
+    cur, *, spa_id, workspace_id, event_id,
+    actor_id, lock_token
+):
+    """Verify an active editing session without modifying the database.
+
+    Caller must use a REPEATABLE READ, READ ONLY transaction and
+    load the event draft within that same transaction.
+
+    This check does not renew the lease. The eventual save still
+    requires require_event_edit_lock_for_save(), which locks rows
+    and rechecks the revision in the save transaction.
+    """
+    _scope(spa_id, workspace_id, event_id, actor_id)
+    token = _token(lock_token)
+
+    cur.execute(
+        """
+        SELECT
+            e.event_revision,
+            l.base_revision,
+            l.expires_at > clock_timestamp() AS lease_active
+        FROM public.event_calendar_events AS e
+        JOIN public.event_calendar_edit_locks AS l
+          ON l.spa_id = e.spa_id
+         AND l.business_unit_id = e.business_unit_id
+         AND l.event_id = e.event_id
+        WHERE e.spa_id = %s
+          AND e.business_unit_id = %s
+          AND e.event_id = %s
+          AND l.editor_user_id = %s
+          AND l.lock_token = %s::uuid
+        """,
+        (
+            spa_id, workspace_id, event_id,
+            actor_id, token,
+        ),
+    )
+
+    row = cur.fetchone()
+
+    if row is None:
+        raise EventEditLockConflict(
+            "Editing session is no longer available."
+        )
+
+    event_revision, base_revision, active = row
+
+    if (
+        not active
+        or int(event_revision) != int(base_revision)
+    ):
+        raise EventEditLockConflict(
+            "Editing session expired or event revision changed."
+        )
+
+    return int(event_revision)
