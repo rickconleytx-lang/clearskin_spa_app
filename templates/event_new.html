@@ -1,6 +1,6 @@
 
 {% extends "base.html" %}
-{% block title %}{{ 'Edit Event' if event_edit_id else 'Add Event' }}{% endblock %}
+{% block title %}{{ 'Edit Event' if event_edit_id else ('Copy Event' if event_copy_id else 'Add Event') }}{% endblock %}
 
 {% block content %}
 
@@ -241,7 +241,11 @@
         {% if event_edit_id %}
             <a id="ec_back_to_calendar" href="{{ url_for('peachpos_event_calendar_month') }}">Back to Event Calendar</a>
             {% else %}
+            {% if event_copy_id %}
+            <a href="{{ url_for('peachpos_event_calendar_month') }}">Back to Event Calendar</a>
+            {% else %}
             <a href="{{ url_for('admin') }}">Back to Calendar Settings</a>
+            {% endif %}
             {% endif %}
     </p>
 
@@ -254,6 +258,50 @@
         <strong>Before saving:</strong>
         Review event details, assigned equipment, and employee shifts. Availability is checked again when you save.
     </p>
+
+
+    {% if event_copy_id %}
+    <style>#ec-copy-custom-dates[hidden] { display: none !important; }</style>
+    <section class="ec-card" id="ec-copy-options" aria-labelledby="ec-copy-heading">
+        <h2 id="ec-copy-heading">Copy Event #{{ event_copy_id }}</h2>
+        <p class="ec-note">Choose what to bring into your new event. The original event will not be changed. Select <strong>Prepare Copy</strong> to load the new event for review.</p>
+        <div class="ec-grid" id="ec-copy-sections">
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="event_details" checked> Event name and public description</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="location" checked> Venue, location, and address</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="daily_hours" checked> Operating days and daily hours</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="equipment" checked> Trucks and equipment assignments</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="notes" checked> Event and daily notes</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="custom_fields" checked> Custom fields</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="contacts"> Event contact details</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="employees"> Employee assignments and shifts</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="permits"> Permits obtained</label>
+        </div>
+        <p class="ec-note">The new event starts as <strong>Scheduled</strong>, with <strong>Include on PeachWeb off</strong>. Employee shifts and permits are not copied unless you select them.</p>
+        <div class="ec-field" style="margin-top:14px;">
+            <label for="ec-copy-date-mode">New Event Dates</label>
+            <select id="ec-copy-date-mode">
+                <option value="next_week" selected>Copy to Next Week (+7 days)</option>
+                <option value="custom">Choose custom dates</option>
+            </select>
+        </div>
+        <div class="ec-grid" id="ec-copy-custom-dates" hidden>
+            <div class="ec-field">
+                <label for="ec-copy-start">New Start Date</label>
+                <input type="date" id="ec-copy-start">
+            </div>
+            <div class="ec-field">
+                <label for="ec-copy-end">New End Date (optional)</label>
+                <input type="date" id="ec-copy-end">
+            </div>
+            <p class="ec-note ec-wide">Leave the end date blank to preserve the original event's number of days. Extended dates start as non-operating and can be configured below.</p>
+        </div>
+        <p style="margin-top:16px;">
+            <button type="button" class="btn" id="ec-prepare-copy">Prepare Copy</button>
+            <a class="btn" href="{{ url_for('peachpos_event_calendar_month') }}">Cancel Copy</a>
+        </p>
+        <p id="ec-copy-status" class="ec-note" role="status" aria-live="polite">Select your options, then Prepare Copy before reviewing and saving.</p>
+    </section>
+    {% endif %}
 
     <section class="ec-card">
         <h2>Event Information</h2>
@@ -792,13 +840,17 @@
         <button class="btn"
                 type="submit"
                 id="ec_save_event"
-                  {% if event_edit_id %}disabled{% endif %}>
+                  {% if event_edit_id %}disabled{% endif %}{% if event_copy_id %}disabled{% endif %}>
             {{ 'Save Changes' if event_edit_id else 'Save Event' }}
         </button>
     </form>
 
     <p id="ec_new_event_link" hidden>
-        <a href="{{ url_for('event_new') }}">
+        <a class="btn" id="ec_return_to_calendar_after_save"
+           href="{{ url_for('peachpos_event_calendar_month') }}">
+            Return to Event Calendar
+        </a>
+        <a href="{{ url_for('event_new') }}" style="margin-left: 12px;">
             Create Another Event
         </a>
     </p>
@@ -812,6 +864,8 @@
 
     const editEventId = {{ event_edit_id | tojson }};
     const isEditMode = Number.isSafeInteger(editEventId) && editEventId > 0;
+    const copyEventId = {{ event_copy_id | tojson }};
+    const isCopyMode = Number.isSafeInteger(copyEventId) && copyEventId > 0;
 
     const startInput = document.getElementById("start_date");
     const endInput = document.getElementById("end_date");
@@ -1683,6 +1737,207 @@
     endInput.addEventListener("change", renderDays);
 
 
+
+    // EC-063: Copy Event is a NEW event. Never submit to Edit Event.
+    let copyDraftReady = false;
+    if (isCopyMode) {
+        window.addEventListener("load", function () {
+            const panel = document.getElementById("ec-copy-options");
+            const prepare = document.getElementById("ec-prepare-copy");
+            const status = document.getElementById("ec-copy-status");
+            const dateMode = document.getElementById("ec-copy-date-mode");
+            const customDates = document.getElementById("ec-copy-custom-dates");
+            const copyStart = document.getElementById("ec-copy-start");
+            const copyEnd = document.getElementById("ec-copy-end");
+            const save = document.getElementById("ec_save_event");
+            const preview = document.getElementById("ec_preview_payload");
+            const csrf = document.querySelector(
+                '#ec_event_transport input[name="security_csrf_token"]'
+            );
+            const heading = document.querySelector(".event-draft h1");
+            if (heading) heading.textContent = "Copy Event #" + copyEventId;
+            if (save) {
+                save.disabled = true;
+                save.textContent = "Save as New Event";
+            }
+            if (preview) preview.disabled = true;
+            if (!panel || !prepare || !status || !save || !preview ||
+                !dateMode || !csrf || !csrf.value || !customDates) {
+                return;
+            }
+            function invalidateCopy() {
+                copyDraftReady = false;
+                save.disabled = true;
+                preview.disabled = true;
+                status.textContent = "Copy options changed. Select Prepare Copy again to apply them.";
+            }
+            dateMode.addEventListener("change", function () {
+                customDates.hidden = dateMode.value !== "custom";
+                invalidateCopy();
+            });
+            panel.querySelectorAll('input[data-copy-section], input[type="date"]')
+                .forEach(function (control) {
+                    control.addEventListener("change", invalidateCopy);
+                });
+
+            prepare.addEventListener("click", async function () {
+                if (copyDraftReady && !window.confirm(
+                    "Prepare the copy again? This replaces your current form edits."
+                )) return;
+                copyDraftReady = false;
+                prepare.disabled = true;
+                save.disabled = true;
+                preview.disabled = true;
+                status.textContent = "Preparing a new event from the saved event...";
+                try {
+                    const sections = {};
+                    panel.querySelectorAll("input[data-copy-section]")
+                        .forEach(function (control) {
+                            sections[control.dataset.copySection] = control.checked;
+                        });
+                    const options = {sections: sections};
+                    if (dateMode.value === "custom") {
+                        if (!parseDate(copyStart.value)) {
+                            throw new Error("Select a valid new start date.");
+                        }
+                        options.target_start_date = copyStart.value;
+                        if (copyEnd.value) {
+                            if (!parseDate(copyEnd.value)) {
+                                throw new Error("Select a valid new end date.");
+                            }
+                            options.target_end_date = copyEnd.value;
+                        }
+                    } else if (dateMode.value !== "next_week") {
+                        throw new Error("Invalid date selection.");
+                    }
+                    const body = new FormData();
+                    body.append("security_csrf_token", csrf.value);
+                    body.append("copy_options", JSON.stringify(options));
+                    const response = await fetch(
+                        "/events/" + copyEventId + "/copy-draft", {
+                            method: "POST", credentials: "same-origin",
+                            cache: "no-store",
+                            headers: {"Accept": "application/json"}, body: body
+                        }
+                    );
+                    if (!(response.headers.get("content-type") || "")
+                        .includes("application/json")) {
+                        throw new Error("Copy request could not be verified. Please sign in again.");
+                    }
+                    const result = await response.json();
+                    if (!response.ok || result.ok !== true) {
+                        throw new Error(typeof result.error === "string" && result.error
+                            ? result.error : "Unable to prepare this event copy.");
+                    }
+                    const draft = result.draft;
+                    if (result.source_event_id !== copyEventId ||
+                        result.saved !== false || !draft || draft.event_id != null ||
+                        !draft.event || !Array.isArray(draft.days) ||
+                        !parseDate(draft.event.start_date) ||
+                        !parseDate(draft.event.end_date)) {
+                        throw new Error("Invalid Copy Event draft. Nothing was changed.");
+                    }
+                    const availableUnitIds = new Set(
+                        Array.from(equipmentTemplate.content.querySelectorAll(
+                            "input[data-event-unit-id]"
+                        ), input => String(input.dataset.eventUnitId))
+                    );
+                    const availableEmployeeIds = new Set(
+                        Array.from(shiftTemplate.content.querySelectorAll(
+                            '[data-shift-field="employeeId"] option'
+                        ), option => String(option.value)).filter(Boolean)
+                    );
+                    const prepared = new Map();
+                    for (const day of draft.days) {
+                        if (!parseDate(day.date) || prepared.has(day.date) ||
+                            !Array.isArray(day.equipment_ids) ||
+                            !Array.isArray(day.shifts)) {
+                            throw new Error("Invalid operating-day information in copy.");
+                        }
+                        const equipmentIds = day.equipment_ids.map(String);
+                        if (equipmentIds.some(id => !availableUnitIds.has(id))) {
+                            throw new Error("Copied equipment is no longer available. Uncheck equipment and Prepare Copy again.");
+                        }
+                        const shifts = day.shifts.map(function (shift) {
+                            const employeeId = String(shift.employee_id);
+                            const unitId = shift.equipment_id == null
+                                ? "" : String(shift.equipment_id);
+                            if (!availableEmployeeIds.has(employeeId) ||
+                                (unitId && !equipmentIds.includes(unitId))) {
+                                throw new Error("A copied employee or assignment is unavailable. Uncheck employees and Prepare Copy again.");
+                            }
+                            return {
+                                employeeId, start: shift.starts || "",
+                                end: shift.ends || "",
+                                overnight: Boolean(shift.ends_next_day),
+                                unitId, role: shift.role || "", notes: shift.notes || ""
+                            };
+                        });
+                        prepared.set(day.date, {
+                            operating: Boolean(day.operating),
+                            open: day.opens || "", close: day.closes || "",
+                            setup: day.setup || "", breakdown: day.breakdown || "",
+                            overnight: Boolean(day.closes_next_day),
+                            notes: day.notes || "", equipmentIds, shifts
+                        });
+                    }
+                    const eventData = draft.event;
+                    const fields = {
+                        event_name: eventData.name,
+                        start_date: eventData.start_date,
+                        end_date: eventData.end_date,
+                        venue_name: eventData.venue_name,
+                        street_address: eventData.street_address,
+                        address_line2: eventData.address_line2,
+                        city: eventData.city, county: eventData.county,
+                        state: eventData.state, zip_code: eventData.zip_code,
+                        parking_setup_location: eventData.parking_setup_location,
+                        contact_name: eventData.contact_name,
+                        contact_phone: eventData.contact_phone,
+                        contact_email: eventData.contact_email,
+                        public_description: eventData.public_description,
+                        notes_1: eventData.notes_1, notes_2: eventData.notes_2
+                    };
+                    for (const [id, value] of Object.entries(fields)) {
+                        const field = document.getElementById(id);
+                        if (!field) throw new Error("A required Copy Event form field is missing.");
+                        field.value = value == null ? "" : String(value);
+                    }
+                    const eventStatus = document.getElementById("event_status");
+                    const scheduled = Array.from(eventStatus.options).find(
+                        option => option.value.toLowerCase() === "scheduled"
+                    );
+                    if (!scheduled) throw new Error("Scheduled status unavailable.");
+                    eventStatus.value = scheduled.value;
+                    document.getElementById("include_on_peachweb").checked = false;
+                    document.getElementById("permits_obtained").checked =
+                        Boolean(eventData.permits_obtained);
+                    for (const slot of ["1", "2", "3"]) {
+                        document.getElementById("custom_" + slot).value =
+                            String((draft.custom_values || {})[slot] || "");
+                    }
+                    dailyValues.clear();
+                    for (const [date, state] of prepared) dailyValues.set(date, state);
+                    renderDays();
+                    // This remains Create Event: no original event ID or revision
+                    // is ever sent to the save endpoint.
+                    copyDraftReady = true;
+                    preview.disabled = false;
+                    save.disabled = false;
+                    status.textContent =
+                        "Proposed new event loaded. Review the fields and daily schedule below. " +
+                        "Select Review Event Details, then Save as New Event. " +
+                        "The original event has not changed.";
+                } catch (error) {
+                    status.textContent = error && error.message ||
+                        "Unable to prepare the copy. Nothing was saved.";
+                } finally {
+                    prepare.disabled = false;
+                }
+            });
+        });
+    }
+
     if (isEditMode) {
         window.addEventListener("load", async function () {
             const status = document.getElementById("ec_edit_status");
@@ -1986,6 +2241,7 @@
     // EC-060-8: Calendar day-number quick add.
     window.addEventListener("load", function () {
         if (isEditMode) return;
+        if (isCopyMode) return;
         const requestedDate =
             new URLSearchParams(window.location.search).get("date");
 
@@ -2629,6 +2885,10 @@
         transport.addEventListener("submit", async function (event) {
             event.preventDefault();
 
+            if (isCopyMode && !copyDraftReady) {
+                showSaveStatus("Select Prepare Copy before saving a new event.", true);
+                return;
+            }
             if (saveInProgress || saveCompleted) return;
 
             const retry = saveUncertain;
@@ -2820,7 +3080,41 @@
                         false
                     );
 
+                    // This action appears only after an acknowledged save.
+                    // A distinct saved-event URL avoids browser Back cache.
                     if (newEventLink) {
+                        const returnLink = document.getElementById(
+                            "ec_return_to_calendar_after_save"
+                        );
+                        if (returnLink) {
+                            const calendarUrl = new URL(
+                                "{{ url_for('peachpos_event_calendar_month') }}",
+                                window.location.href
+                            );
+                            // Use the submitted payload, not an edited field,
+                            // to choose the newly saved event's calendar month.
+                            let startDate = null;
+                            try {
+                                const savedDraft = JSON.parse(pendingSavePayload);
+                                startDate = savedDraft && savedDraft.event &&
+                                    savedDraft.event.start_date;
+                            } catch (_error) {
+                                // The default calendar link remains available.
+                            }
+                            const dateParts = typeof startDate === "string"
+                                ? /^(\d{4})-(0[1-9]|1[0-2])-\d{2}$/.exec(startDate)
+                                : null;
+                            if (dateParts) {
+                                calendarUrl.searchParams.set("year", dateParts[1]);
+                                calendarUrl.searchParams.set(
+                                    "month", String(Number(dateParts[2]))
+                                );
+                            }
+                            calendarUrl.searchParams.set(
+                                "saved_event_id", String(result.event_id)
+                            );
+                            returnLink.href = calendarUrl.href;
+                        }
                         newEventLink.hidden = false;
                     }
 
@@ -2883,7 +3177,8 @@
 
                 } else {
                     unlockEditor();
-                    saveButton.textContent = "Save Event";
+                    saveButton.textContent = isCopyMode
+                        ? "Save as New Event" : "Save Event";
                     saveButton.disabled = false;
                     previewButton.disabled = false;
 

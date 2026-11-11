@@ -359,6 +359,8 @@
         <div class="ec-detail-footer">
             <button type="button" id="ec-detail-edit"
                     class="btn" hidden>Edit Event</button>
+            <button type="button" id="ec-detail-copy"
+                    class="btn" hidden>Copy Event</button>
             <button type="button"
                     id="ec-detail-close"
                     class="btn ec-detail-close">
@@ -380,6 +382,7 @@
     const content = document.getElementById("ec-detail-content");
     const closeButton = document.getElementById("ec-detail-close");
     const editButton = document.getElementById("ec-detail-edit");
+    const copyButton = document.getElementById("ec-detail-copy");
     const editMessage = document.getElementById("ec-detail-edit-message");
     const editCsrf = document.getElementById("ec-calendar-edit-csrf");
     let activeEventButton = null;
@@ -578,6 +581,7 @@
         activeEventButton = null;
         activeEventId = null;
         editButton.hidden = true;
+        copyButton.hidden = true;
         editMessage.textContent = "";
         const requestNumber = ++currentRequest;
 
@@ -619,6 +623,7 @@
                     activeEventButton = button;
                     activeEventId = eventId;
                     editButton.hidden = false;
+                    copyButton.hidden = false;
                 }
             }
         } catch (_error) {
@@ -652,6 +657,15 @@
         );
         editUrl.searchParams.set("edit", String(activeEventId));
         window.location.assign(editUrl.href);
+    });
+
+    copyButton.addEventListener("click", function () {
+        if (!activeEventId || !activeEventButton || !dialog.open) return;
+        const copyUrl = new URL(
+            "{{ url_for('event_new') }}", window.location.href
+        );
+        copyUrl.searchParams.set("copy", String(activeEventId));
+        window.location.assign(copyUrl.href);
     });
 
     closeButton.addEventListener("click", function () {

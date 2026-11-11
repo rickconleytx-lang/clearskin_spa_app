@@ -130932,9 +130932,21 @@ def peachpos_event_edit_save_unlocked(event_id):
 @require_subscription_feature("event_calendar")
 @require_workspace_permission("can_manage_event_units")
 def event_new():
-    # Edit data requires a separate POST with CSRF and active lease.
+    # IDs on the query string only select a protected source; no draft
+    # is loaded until a POST with the administrator's CSRF token.
     edit_raw = request.args.get("edit")
+    copy_raw = request.args.get("copy")
+    if edit_raw is not None and copy_raw is not None:
+        abort(404)
     edit_event_id = None
+    copy_event_id = None
+    if copy_raw is not None:
+        if (not copy_raw.isascii() or not copy_raw.isdecimal()
+                or len(copy_raw) > 18):
+            abort(404)
+        copy_event_id = int(copy_raw)
+        if copy_event_id <= 0:
+            abort(404)
 
     if edit_raw is not None:
         if (
@@ -131056,6 +131068,7 @@ def event_new():
         available_event_employees=event_employees,
         event_csrf_token=_security_form_csrf_token(),
         event_edit_id=edit_event_id,
+        event_copy_id=copy_event_id,
     )
 
 
