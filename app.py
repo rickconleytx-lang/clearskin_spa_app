@@ -130561,6 +130561,112 @@ def save_peachpos_event():
     }), (201 if created else 200)
 
 
+# ==========================================================
+# PeachPOS Event Calendar — protected exclusive editing lease
+# ==========================================================
+
+@app.route("/events/<int:event_id>/edit-lock", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_edit_lock(event_id):
+    from flask import jsonify
+    from services.event_calendar_edit_locks import (
+        EventEditLockError,
+        acquire_event_edit_lock,
+        renew_event_edit_lock,
+        release_event_edit_lock,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    if event_id <= 0:
+        abort(404)
+
+    if (
+        request.content_length is not None
+        and request.content_length > 8192
+    ):
+        abort(413)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    action = (request.form.get("action") or "").strip()
+
+    if action not in ("acquire", "renew", "release"):
+        abort(400)
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    def respond(payload, status=200):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "no-store"
+        return response, status
+
+    conn = get_db_connection()
+
+    try:
+        scope = {
+            "spa_id": spa_id,
+            "workspace_id": workspace_id,
+            "event_id": event_id,
+            "actor_id": actor_id,
+        }
+
+        if action == "acquire":
+            result = acquire_event_edit_lock(conn, **scope)
+
+            if result["status"] == "not_found":
+                return respond(
+                    {"status": "not_found"},
+                    404,
+                )
+
+            if result["status"] == "busy":
+                return respond(result, 409)
+
+            return respond(result)
+
+        lock_token = request.form.get("lock_token")
+
+        if action == "renew":
+            result = renew_event_edit_lock(
+                conn,
+                lock_token=lock_token,
+                **scope,
+            )
+
+            return respond(
+                result,
+                200 if result["status"] == "renewed" else 409,
+            )
+
+        result = release_event_edit_lock(
+            conn,
+            lock_token=lock_token,
+            **scope,
+        )
+
+        return respond(
+            result,
+            200 if result["released"] else 409,
+        )
+
+    except EventEditLockError:
+        return respond(
+            {"error": "Invalid or unavailable editing session."},
+            400,
+        )
+
+    finally:
+        conn.close()
+
+
 @app.route("/events/add", methods=["GET"])
 @login_required
 @spa_required
