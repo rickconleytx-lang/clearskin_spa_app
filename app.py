@@ -130577,6 +130577,102 @@ def save_peachpos_event():
 # PeachPOS Event Calendar — protected exclusive editing lease
 # ==========================================================
 
+@app.route("/events/<int:event_id>/copy-draft", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_copy_draft(event_id):
+    """Prepare a new-event draft; no reservation, source edit, or DB write."""
+    import json
+    from flask import jsonify
+    from services.event_calendar_edit_read import (
+        EventEditReadError,
+        load_event_edit_payload,
+    )
+    from services.event_calendar_copy import (
+        EventCopyInvalid,
+        build_event_copy_draft,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+    if event_id <= 0:
+        abort(404)
+    if (
+        request.content_length is not None
+        and request.content_length > 16384
+    ):
+        abort(413)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    def respond(payload, status=200):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response, status
+
+    raw_options = request.form.get("copy_options", "")
+    if len(raw_options) > 12000:
+        return respond({"ok": False, "error": "Invalid copy options."}, 400)
+    if raw_options:
+        try:
+            options = json.loads(raw_options)
+        except (ValueError, TypeError, RecursionError):
+            return respond({"ok": False, "error": "Invalid copy options."}, 400)
+    else:
+        options = {}
+
+    if type(options) is not dict or not set(options).issubset({
+        "sections", "target_start_date", "target_end_date"
+    }):
+        return respond({"ok": False, "error": "Invalid copy options."}, 400)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+    conn = get_db_connection()
+    try:
+        conn.set_session(
+            readonly=True,
+            isolation_level="REPEATABLE READ",
+            autocommit=False,
+        )
+        source = load_event_edit_payload(
+            conn,
+            event_id=event_id,
+            spa_id=spa_id,
+            workspace_id=workspace_id,
+        )
+        if source is None:
+            return respond({"ok": False, "error": "Event not found."}, 404)
+
+        try:
+            draft = build_event_copy_draft(source, **options)
+        except EventCopyInvalid as exc:
+            return respond({"ok": False, "error": str(exc)}, 422)
+
+        return respond({
+            "ok": True,
+            "saved": False,
+            "source_event_id": event_id,
+            "source_event_revision": source["event_revision"],
+            "draft": draft,
+        })
+    except EventEditReadError:
+        return respond({
+            "ok": False,
+            "error": "This event cannot be copied.",
+        }, 409)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+
 @app.route("/events/<int:event_id>/edit-draft", methods=["POST"])
 @login_required
 @spa_required
