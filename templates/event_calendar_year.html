@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Year Event Calendar | Peach Suite Pro{% endblock %}
+
+{% block content %}
+<style>
+.ec-year-page { width: 100%; max-width: 1600px; margin: 0 auto; color: #3c3432; }
+.ec-year-heading { display: flex; align-items: start; justify-content: space-between;
+    flex-wrap: wrap; gap: 14px; margin-bottom: 18px; }
+.ec-year-heading h1 { margin: 0 0 5px; }
+.ec-year-heading p { margin: 0; color: #756e68; }
+.ec-year-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.ec-calendar-view-switch { display: inline-flex; gap: 4px; padding: 4px;
+    margin-bottom: 15px; border: 1px solid #e2d9d3; background: #f7f1ec;
+    border-radius: 11px; }
+.ec-calendar-view-switch a { padding: 8px 18px; border-radius: 8px;
+    color: #594e4b; text-decoration: none; font-weight: 700; font-size: .94rem; }
+.ec-calendar-view-switch a:hover { background: #eee3dc; }
+.ec-calendar-view-switch a.is-active { background: #75545e; color: white; }
+.ec-calendar-view-switch a:focus-visible { outline: 3px solid #207c78; outline-offset: 2px; }
+.ec-year-toolbar { display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.ec-year-toolbar h2 { margin: 0; font-size: 1.6rem; }
+.ec-year-navigation { display: flex; flex-wrap: wrap; gap: 8px; }
+.ec-year-navigation a, .ec-year-navigation span { border: 1px solid #d8d5d0;
+    border-radius: 9px; padding: 8px 12px; background: white;
+    color: #443b38; text-decoration: none; }
+.ec-year-navigation a:hover { background: #f4f1ed; }
+.ec-year-navigation .is-disabled { opacity: .4; }
+.ec-year-summary { color: #756e68; font-size: .9rem; margin: 0 0 18px; }
+.ec-year-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px; align-items: start; }
+.ec-year-month { min-width: 0; background: #fff; border: 1px solid #e2dbd4;
+    border-radius: 14px; padding: 16px; box-shadow: 0 2px 10px rgba(54,39,36,.035); }
+.ec-year-month-heading { display: flex; justify-content: space-between;
+    align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 13px; }
+.ec-year-month-heading a { font-size: 1.08rem; font-weight: 750; text-decoration: none;
+    color: #674650; }
+.ec-year-month-heading a:hover, .ec-year-month-heading a:focus-visible { text-decoration: underline; }
+.ec-year-month-total { color: #746e68; font-size: .78rem; }
+.ec-year-weekdays, .ec-year-dates { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 3px; text-align: center; }
+.ec-year-weekdays { margin-bottom: 5px; }
+.ec-year-weekdays span { font-size: .7rem; font-weight: 700; color: #867a74; }
+.ec-year-date { min-width: 0; min-height: 33px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center; position: relative;
+    color: #514845; text-decoration: none; font-size: .78rem;
+    border: 1px solid transparent; }
+.ec-year-date.is-outside { color: transparent; }
+.ec-year-date.is-active { background: #d8eeea; border-color: #92c6bd;
+    color: #175950; font-weight: 800; }
+.ec-year-date.is-active:hover { background: #bce1d9; }
+.ec-year-date.is-cancelled { border: 1px dashed #d5ab6e;
+    background: #fff6e8; color: #8a6438; }
+.ec-year-date.is-today { outline: 2px solid #75545e; outline-offset: -2px; }
+.ec-year-date:focus-visible { outline: 3px solid #1d6f6b; outline-offset: 1px; }
+.ec-year-day-count { position: absolute; right: 2px; bottom: 1px; font-size: .53rem;
+    line-height: 1; color: #14574e; }
+.ec-year-month-footer { margin: 13px 0 0; padding-top: 10px;
+    border-top: 1px solid #efe9e4; color: #756e68; font-size: .77rem; }
+.ec-year-footnote { font-size: .87rem; color: #756e68; margin: 18px 0; }
+@media (max-width: 1100px) { .ec-year-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 650px) { .ec-year-grid { grid-template-columns: minmax(0, 1fr); }
+    .ec-year-month { padding: 14px; } }
+</style>
+
+<section class="ec-year-page">
+    <div class="ec-year-heading">
+        <div>
+            <h1>Event Calendar</h1>
+            <p>See when your trucks, trailers, carts, and booths are scheduled throughout the year.</p>
+        </div>
+        <div class="ec-year-actions">
+            <a class="btn" href="{{ url_for('event_new') }}">Add Event</a>
+            <a class="btn" href="{{ url_for('event_units_home') }}">Manage Event Units</a>
+        </div>
+    </div>
+
+    <nav class="ec-calendar-view-switch" aria-label="Event calendar views">
+        <a class="is-active" aria-current="page"
+           href="{{ url_for('peachpos_event_calendar_year', year=calendar.year) }}">Year</a>
+        <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=current_month) }}">Month</a>
+    </nav>
+
+    <div class="ec-year-toolbar">
+        <h2>{{ calendar.label }}</h2>
+        <nav class="ec-year-navigation" aria-label="Calendar years">
+            {% if calendar.previous_year is not none %}
+            <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.previous_year) }}">Previous Year</a>
+            {% else %}<span class="is-disabled" aria-disabled="true">Previous Year</span>{% endif %}
+            <a href="{{ url_for('peachpos_event_calendar_year') }}">This Year</a>
+            {% if calendar.next_year is not none %}
+            <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.next_year) }}">Next Year</a>
+            {% else %}<span class="is-disabled" aria-disabled="true">Next Year</span>{% endif %}
+        </nav>
+    </div>
+
+    <p class="ec-year-summary">
+        {{ calendar.active_dates }} active operating date(s) ·
+        {{ calendar.event_days }} event-day(s) ·
+        {{ calendar.unit_days }} truck/unit-day(s)
+        {% if calendar.cancelled_event_days %}
+        · {{ calendar.cancelled_event_days }} cancelled event-day(s)
+        {% endif %}
+    </p>
+
+    <div class="ec-year-grid">
+        {% for month in calendar.months %}
+        <section class="ec-year-month" aria-label="{{ month.name }} {{ calendar.year }}">
+            <div class="ec-year-month-heading">
+                <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=month.number) }}">
+                    {{ month.name }}
+                </a>
+                <span class="ec-year-month-total">{{ month.event_days }} event-day(s)</span>
+            </div>
+            <div class="ec-year-weekdays" aria-hidden="true">
+                {% for label in ['S', 'M', 'T', 'W', 'T', 'F', 'S'] %}
+                <span>{{ label }}</span>
+                {% endfor %}
+            </div>
+            <div class="ec-year-dates">
+                {% for week in month.weeks %}
+                    {% for day in week %}
+                        {% if not day.in_month %}
+                        <span class="ec-year-date is-outside" aria-hidden="true"></span>
+                        {% elif day.events > 0 %}
+                        <a class="ec-year-date is-active{% if day.today %} is-today{% endif %}"
+                           href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=month.number) }}"
+                           title="{{ day.date.strftime('%B %d, %Y') }}: {{ day.events }} event(s), {{ day.units }} unit(s)"
+                           aria-label="{{ day.date.strftime('%B %d, %Y') }}: {{ day.events }} event(s), {{ day.units }} unit(s). Open Month View.">
+                            {{ day.number }}
+                            {% if day.events > 1 %}<span class="ec-year-day-count" aria-hidden="true">{{ day.events }}</span>{% endif %}
+                        </a>
+                        {% elif day.cancelled > 0 %}
+                        <span class="ec-year-date is-cancelled{% if day.today %} is-today{% endif %}"
+                              title="{{ day.date.strftime('%B %d, %Y') }}: {{ day.cancelled }} cancelled event(s)"
+                              aria-label="{{ day.date.strftime('%B %d, %Y') }}: cancelled event(s)">{{ day.number }}</span>
+                        {% else %}
+                        <span class="ec-year-date{% if day.today %} is-today{% endif %}">{{ day.number }}</span>
+                        {% endif %}
+                    {% endfor %}
+                {% endfor %}
+            </div>
+            <p class="ec-year-month-footer">{{ month.active_dates }} active operating date(s) · {{ month.unit_days }} unit-day(s)</p>
+        </section>
+        {% endfor %}
+    </div>
+
+    <p class="ec-year-footnote">
+        Teal dates have scheduled events; outlined amber dates have only cancelled events.
+        Select a month or highlighted date to open the existing Month Calendar.
+        Counts represent operating dates and assignments, not unique multi-day events.
+    </p>
+</section>
+{% endblock %}

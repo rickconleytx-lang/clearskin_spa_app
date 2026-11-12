@@ -130188,6 +130188,54 @@ def peachpos_event_calendar_month():
 # PeachPOS Event Calendar — protected read-only details
 # ==========================================================
 
+@app.route("/events/calendar/year", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_calendar_year():
+    """Read-only annual summary for the authenticated PeachPOS workspace."""
+    from datetime import date
+    from flask import make_response, render_template, request
+    from services.event_calendar_year_read import list_year_day_summaries
+    from services.event_calendar_year import build_year_view
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    today = date.today()
+    try:
+        year = int(request.args["year"]) if "year" in request.args else today.year
+    except (ValueError, TypeError):
+        abort(400)
+    if not 2000 <= year <= 2100:
+        abort(400)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+        summaries = list_year_day_summaries(
+            conn, spa_id, workspace_id, year
+        )
+        calendar_data = build_year_view(summaries, year, today)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(render_template(
+        "event_calendar_year.html",
+        calendar=calendar_data,
+        current_month=today.month if year == today.year else 1,
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @app.route("/events/<int:event_id>/details", methods=["GET"])
 @login_required
 @spa_required

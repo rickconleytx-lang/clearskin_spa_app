@@ -26,6 +26,33 @@
     gap: 9px;
     flex-wrap: wrap;
 }
+.ec-calendar-view-switch {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 15px;
+    border: 1px solid #e2d9d3;
+    background: #f7f1ec;
+    border-radius: 11px;
+}
+.ec-calendar-view-switch a {
+    padding: 8px 18px;
+    border-radius: 8px;
+    color: #594e4b;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 0.94rem;
+}
+.ec-calendar-view-switch a:hover { background: #eee3dc; }
+.ec-calendar-view-switch a.is-active {
+    background: #75545e;
+    color: white;
+}
+.ec-calendar-view-switch a:focus-visible {
+    outline: 3px solid #207c78;
+    outline-offset: 2px;
+}
+
 .ec-month-toolbar {
     display: flex;
     align-items: center;
@@ -250,6 +277,12 @@
             </a>
         </div>
     </div>
+
+    <nav class="ec-calendar-view-switch" aria-label="Event calendar views">
+        <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.year) }}">Year</a>
+        <a class="is-active" aria-current="page"
+           href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=calendar.month) }}">Month</a>
+    </nav>
 
     <div class="ec-month-toolbar">
         <h2>{{ calendar.label }}</h2>
