@@ -130118,6 +130118,105 @@ def _event_unit_form_values(form):
 # PeachPOS Event Calendar — read-only Month view
 # ==========================================================
 
+@app.route("/events/view", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_view_events():
+    """Read-only View Events list for the authenticated PeachPOS workspace.
+
+    Next Date reference and archive labels are display-only in EC-065-2C.
+    This endpoint never writes schedule, metadata, or reminder records.
+    """
+    from datetime import date
+    from flask import make_response
+    from services.event_calendar_view_events import (
+        ViewEventsError,
+        list_view_events,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+
+    start_raw = (request.args.get("start_date") or "").strip()
+    end_raw = (request.args.get("end_date") or "").strip()
+    status = (request.args.get("status") or "").strip().lower()
+    search = (request.args.get("search") or "").strip()
+    archive_mode = (request.args.get("archive") or "active").strip().lower()
+    page_raw = (request.args.get("page") or "1").strip()
+
+    def parse_date(raw):
+        if not raw:
+            return None
+        if (
+            len(raw) != 10
+            or raw[4] != "-"
+            or raw[7] != "-"
+            or not all(ch.isascii() and ch.isdecimal() for ch in raw if ch != "-")
+        ):
+            abort(400)
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            abort(400)
+
+    start_date = parse_date(start_raw)
+    end_date = parse_date(end_raw)
+
+    if (
+        not page_raw.isascii()
+        or not page_raw.isdecimal()
+        or len(page_raw) > 4
+    ):
+        abort(400)
+    page = int(page_raw)
+    if not 1 <= page <= 2001:
+        abort(400)
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+        try:
+            result = list_view_events(
+                conn,
+                spa_id,
+                workspace_id,
+                start_date=start_date,
+                end_date=end_date,
+                status=status,
+                search=search,
+                archive_mode=archive_mode,
+                limit=50,
+                offset=(page - 1) * 50,
+            )
+        except ViewEventsError:
+            abort(400)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(render_template(
+        "event_view_events.html",
+        events=result["events"],
+        has_more=result["has_more"],
+        page=page,
+        start_date=start_raw,
+        end_date=end_raw,
+        status=status,
+        search=search,
+        archive_mode=archive_mode,
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @app.route("/events/calendar", methods=["GET"])
 @login_required
 @spa_required

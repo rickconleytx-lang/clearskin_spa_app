@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}View Events | Peach Suite Pro{% endblock %}
+
+{% block content %}
+<style>
+.ec-view-page { max-width: 1550px; margin: 0 auto; color: #3a3434; }
+.ec-view-heading { display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin: 3px 0 20px; }
+.ec-view-heading h1 { margin: 0 0 6px; }
+.ec-view-heading p { margin: 0; color: #6f6662; }
+.ec-view-heading-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+.ec-view-heading-actions a, .ec-view-action, .ec-view-pager a,
+.ec-view-filters button, .ec-view-filters .ec-view-clear {
+    display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
+    border: 1px solid #d6cdca; background: #fff; color: #493f3d;
+    border-radius: 9px; padding: 8px 12px; font-size: .91rem;
+    line-height: 1.25; font-weight: 650; cursor: pointer; }
+.ec-view-heading-actions a:hover, .ec-view-action:hover, .ec-view-pager a:hover,
+.ec-view-filters button:hover, .ec-view-filters .ec-view-clear:hover {
+    background: #f4eae8; }
+.ec-view-filters { display: flex; align-items: flex-end; gap: 12px;
+    flex-wrap: wrap; padding: 18px; background: #faf6f2; border: 1px solid #e7dcd5;
+    border-radius: 13px; margin-bottom: 16px; }
+.ec-view-field { display: flex; flex-direction: column; gap: 6px; min-width: 135px; flex: 1 1 135px; }
+.ec-view-field.ec-view-search { flex: 2 1 220px; }
+.ec-view-field label { color: #635551; font-size: .84rem; font-weight: 700; }
+.ec-view-field input, .ec-view-field select { width: 100%; box-sizing: border-box;
+    border: 1px solid #cfc4be; border-radius: 8px; padding: 10px;
+    background: #fff; color: #332e2b; font-size: .95rem; min-height: 41px; }
+.ec-view-filter-actions { display: flex; gap: 8px; flex: 0 1 auto; }
+.ec-view-filters button { background: #75545e; color: #fff; border-color: #75545e;
+    min-height: 41px; }
+.ec-view-filters button:hover { background: #62434e; color: #fff; }
+.ec-view-filters .ec-view-clear { min-height: 41px; }
+.ec-view-note { margin-bottom: 15px; color: #675e59; font-size: .9rem; }
+.ec-view-table-scroll { overflow-x: auto; border: 1px solid #e5dbd5;
+    border-radius: 12px; background: #fff; }
+.ec-view-table { width: 100%; min-width: 1000px; border-collapse: collapse; }
+.ec-view-table th { background: #205f63; color: #fff; font-size: .87rem;
+    text-align: left; padding: 13px 12px; white-space: nowrap; }
+.ec-view-table td { padding: 12px; border-bottom: 1px solid #f0ebe7;
+    vertical-align: top; font-size: .9rem; color: #3d3735; }
+.ec-view-table tr:last-child td { border-bottom: 0; }
+.ec-view-table tbody tr:hover { background: #faf7f3; }
+.ec-view-main { font-weight: 750; }
+.ec-view-secondary { display: block; color: #817671; margin-top: 4px; font-size: .81rem; }
+.ec-view-archive-label { display: inline-flex; color: #7a5d38; background: #fff2da;
+    border-radius: 6px; padding: 3px 7px; margin-top: 5px; font-size: .77rem; }
+.ec-view-actions { display: flex; gap: 6px; flex-wrap: wrap; white-space: nowrap; }
+.ec-view-action { padding: 6px 10px; font-size: .82rem; }
+.ec-view-empty { text-align: center; padding: 35px 15px !important;
+    color: #70655f !important; }
+.ec-view-pager { display: flex; justify-content: space-between; align-items: center;
+    margin: 15px 0; gap: 10px; flex-wrap: wrap; color: #6f6662; }
+.ec-view-page a:focus-visible, .ec-view-page button:focus-visible,
+.ec-view-page input:focus-visible, .ec-view-page select:focus-visible {
+    outline: 3px solid #31827c; outline-offset: 2px; }
+@media (max-width: 650px) { .ec-view-filters { padding: 12px; }
+    .ec-view-filter-actions { width: 100%; }
+    .ec-view-filter-actions > * { flex: 1; } }
+</style>
+
+<section class="ec-view-page">
+    <div class="ec-view-heading">
+        <div>
+            <h1>View Events</h1>
+            <p>Review your event history, organizer contacts, and future event references.</p>
+        </div>
+        <nav class="ec-view-heading-actions" aria-label="Event navigation">
+            <a href="{{ url_for('peachpos_event_calendar_month') }}">Event Calendar</a>
+            <a href="{{ url_for('event_new') }}">Add Event</a>
+            <a href="{{ url_for('event_units_home') }}">Event Units</a>
+        </nav>
+    </div>
+
+    <form class="ec-view-filters" method="GET" action="{{ url_for('peachpos_view_events') }}">
+        <div class="ec-view-field ec-view-search">
+            <label for="ec-view-search">Find Event, Venue, City, or Contact</label>
+            <input type="search" id="ec-view-search" name="search" maxlength="100"
+                   value="{{ search }}" placeholder="Search events" autocomplete="off">
+        </div>
+        <div class="ec-view-field">
+            <label for="ec-view-from">From</label>
+            <input type="date" id="ec-view-from" name="start_date" value="{{ start_date }}">
+        </div>
+        <div class="ec-view-field">
+            <label for="ec-view-to">To</label>
+            <input type="date" id="ec-view-to" name="end_date" value="{{ end_date }}">
+        </div>
+        <div class="ec-view-field">
+            <label for="ec-view-status">Event Status</label>
+            <select id="ec-view-status" name="status">
+                <option value="" {% if not status %}selected{% endif %}>All statuses</option>
+                <option value="scheduled" {% if status == 'scheduled' %}selected{% endif %}>Scheduled</option>
+                <option value="confirmed" {% if status == 'confirmed' %}selected{% endif %}>Confirmed</option>
+                <option value="completed" {% if status == 'completed' %}selected{% endif %}>Completed</option>
+                <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+            </select>
+        </div>
+        <div class="ec-view-field">
+            <label for="ec-view-archive">View</label>
+            <select id="ec-view-archive" name="archive">
+                <option value="active" {% if archive_mode == 'active' %}selected{% endif %}>Active list</option>
+                <option value="archived" {% if archive_mode == 'archived' %}selected{% endif %}>Archived</option>
+                <option value="all" {% if archive_mode == 'all' %}selected{% endif %}>All events</option>
+            </select>
+        </div>
+        <div class="ec-view-filter-actions">
+            <button type="submit">Filter</button>
+            <a class="ec-view-clear" href="{{ url_for('peachpos_view_events') }}">Clear</a>
+        </div>
+    </form>
+
+    <p class="ec-view-note">Next Date is a flexible planning reference only. It does not create an
+        Event Calendar booking or a Business Schedule reminder.</p>
+
+    <div class="ec-view-table-scroll" role="region" aria-label="Event list" tabindex="0">
+        <table class="ec-view-table">
+            <thead>
+                <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Event</th>
+                    <th scope="col">City</th>
+                    <th scope="col">Contact Name</th>
+                    <th scope="col">Next Date</th>
+                    <th scope="col">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in events %}
+                <tr>
+                    <td>
+                        {{ event.start_date.strftime('%b %d, %Y') }}
+                        {% if event.end_date != event.start_date %}
+                            <span class="ec-view-secondary">through {{ event.end_date.strftime('%b %d, %Y') }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="ec-view-main">{{ event.event_name }}</span>
+                        {% if event.venue_name %}<span class="ec-view-secondary">{{ event.venue_name }}</span>{% endif %}
+                        {% if event.is_archived %}<span class="ec-view-archive-label">Archived reference</span>{% endif %}
+                    </td>
+                    <td>{{ event.city or '—' }}{% if event.state %}, {{ event.state }}{% endif %}</td>
+                    <td>{{ event.contact_name or '—' }}</td>
+                    <td>{{ event.next_date_display }}</td>
+                    <td>
+                        <div class="ec-view-actions">
+                            <a class="ec-view-action" href="{{ url_for('peachpos_event_calendar_month', year=event.start_date.year, month=event.start_date.month) }}">Go To Month</a>
+                            <a class="ec-view-action" href="{{ url_for('event_new', edit=event.event_id) }}">Edit</a>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="ec-view-empty">No events match these filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <nav class="ec-view-pager" aria-label="Event list pages">
+        <span>Page {{ page }} · Up to 50 events per page</span>
+        <div class="ec-view-actions">
+            {% if page > 1 %}
+                <a href="{{ url_for('peachpos_view_events', page=page - 1, start_date=start_date, end_date=end_date, status=status, search=search, archive=archive_mode) }}">Previous</a>
+            {% endif %}
+            {% if has_more %}
+                <a href="{{ url_for('peachpos_view_events', page=page + 1, start_date=start_date, end_date=end_date, status=status, search=search, archive=archive_mode) }}">Next</a>
+            {% endif %}
+        </div>
+    </nav>
+</section>
+{% endblock %}
