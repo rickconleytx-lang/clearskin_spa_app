@@ -1,0 +1,622 @@
+{% extends "base.html" %}
+{% block title %}Week Event Calendar | Peach Suite Pro{% endblock %}
+{% block content %}
+<style>
+.ec-week-page { width: 100%; color: #3c3432; }
+.ec-week-heading { display: flex; align-items: flex-start; justify-content: space-between;
+    flex-wrap: wrap; gap: 15px; margin-bottom: 18px; }
+.ec-week-heading h1 { margin: 0 0 5px; color: #72565e; }
+.ec-week-heading p { margin: 0; color: #756e68; }
+.ec-week-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+.ec-calendar-view-switch { display: inline-flex; gap: 4px; padding: 4px;
+    margin-bottom: 15px; border: 1px solid #e2d9d3; background: #f7f1ec;
+    border-radius: 11px; }
+.ec-calendar-view-switch a { padding: 8px 18px; border-radius: 8px;
+    color: #594e4b; text-decoration: none; font-weight: 700; font-size: .94rem; }
+.ec-calendar-view-switch a:hover { background: #eee3dc; }
+.ec-calendar-view-switch a.is-active { background: #75545e; color: #fff; }
+.ec-calendar-view-switch a:focus-visible { outline: 3px solid #207c78; outline-offset: 2px; }
+.ec-week-toolbar { display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.ec-week-toolbar h2 { margin: 0; font-size: 1.4rem; color: #72565e; }
+.ec-week-navigation { display: flex; flex-wrap: wrap; gap: 8px; }
+.ec-week-navigation a, .ec-week-navigation span { border: 1px solid #d8d5d0;
+    border-radius: 9px; padding: 8px 12px; background: #fff;
+    color: #443b38; text-decoration: none; }
+.ec-week-navigation a:hover { background: #f4f1ed; }
+.ec-week-navigation .is-disabled { opacity: .4; }
+.ec-week-summary { font-size: .91rem; color: #756e68; margin: 0 0 14px; }
+.ec-week-scroll { width: 100%; overflow-x: auto; border-radius: 13px;
+    border: 1px solid #e2dbd4; background: #fff; }
+.ec-week-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+    min-width: 980px; align-items: stretch; }
+.ec-week-day { min-width: 0; min-height: 365px; padding: 10px 9px 18px;
+    border-right: 1px solid #e9e6e2; }
+.ec-week-day:last-child { border-right: 0; }
+.ec-week-day.is-today { box-shadow: inset 0 0 0 2px #237f7b; }
+.ec-week-day-header { display: flex; flex-direction: column; align-items: center;
+    gap: 5px; padding: 8px 3px 11px; border-bottom: 1px solid #eee6e0;
+    margin-bottom: 12px; }
+.ec-week-weekday { color: #7a6c69; font-size: .82rem; font-weight: 700; }
+.ec-week-date-number { font-size: 1.3rem; font-weight: 800; color: #604950;
+    text-decoration: none; display: inline-flex; align-items: center;
+    justify-content: center; width: 43px; height: 43px; border-radius: 50%; }
+.ec-week-date-number:hover { background: #e2f1ed; }
+.ec-week-date-number:focus-visible { outline: 3px solid #207c78; outline-offset: 2px; }
+.ec-week-day.is-today .ec-week-date-number { background: #75545e; color: #fff; }
+.ec-week-date-caption { font-size: .72rem; color: #827772; text-align: center; }
+.ec-week-day-total { font-size: .72rem; color: #827772;
+    text-align: center; margin: 0 0 10px; }
+.ec-week-event { display: block; width: 100%; text-align: left; font-family: inherit;
+    border: 0; border-radius: 8px; padding: 9px 8px; margin: 9px 0;
+    font-size: .77rem; line-height: 1.4; overflow-wrap: anywhere;
+    cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.ec-week-event:hover { filter: brightness(.96); }
+.ec-week-event:focus-visible { outline: 3px solid #173c7c; outline-offset: 2px; }
+.ec-week-event.is-cancelled { border: 2px dashed currentColor; }
+.ec-week-event-name { display: block; font-weight: 800; margin-bottom: 3px; }
+.ec-week-event-unit { display: block; font-weight: 650; margin-bottom: 3px; }
+.ec-week-event-hours, .ec-week-event-venue,
+.ec-week-event-location, .ec-week-event-status { display: block; margin-top: 3px; }
+.ec-week-empty { color: #a29a93; text-align: center; font-size: .81rem;
+    margin: 18px 0; }
+.ec-week-footnote { margin: 15px 0; font-size: .87rem; color: #756e68; }
+@media (max-width: 700px) { .ec-week-day { min-height: 270px; }
+    .ec-week-heading { align-items: flex-start; } }
+</style>
+
+<section class="ec-week-page">
+    <div class="ec-week-heading">
+        <div>
+            <h1>Event Calendar</h1>
+            <p>See each truck's operating schedule and location for the week.</p>
+        </div>
+        <div class="ec-week-actions">
+            <a class="btn" href="{{ url_for('event_new') }}">Add Event</a>
+            <a class="btn" href="{{ url_for('event_units_home') }}">Manage Event Units</a>
+        </div>
+    </div>
+    <nav class="ec-calendar-view-switch" aria-label="Event calendar views">
+        <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.year) }}">Year</a>
+        <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=calendar.month) }}">Month</a>
+        <a class="is-active" aria-current="page"
+           href="{{ url_for('peachpos_event_calendar_week', date=calendar.anchor_date.isoformat()) }}">Week</a>
+    </nav>
+    <div class="ec-week-toolbar">
+        <h2>{{ calendar.label }}</h2>
+        <nav class="ec-week-navigation" aria-label="Calendar weeks">
+            {% if calendar.previous_date is not none %}
+                <a href="{{ url_for('peachpos_event_calendar_week', date=calendar.previous_date.isoformat()) }}">Previous Week</a>
+            {% else %}
+                <span class="is-disabled" aria-disabled="true">Previous Week</span>
+            {% endif %}
+            <a href="{{ url_for('peachpos_event_calendar_week') }}">This Week</a>
+            {% if calendar.next_date is not none %}
+                <a href="{{ url_for('peachpos_event_calendar_week', date=calendar.next_date.isoformat()) }}">Next Week</a>
+            {% else %}
+                <span class="is-disabled" aria-disabled="true">Next Week</span>
+            {% endif %}
+        </nav>
+    </div>
+    <p class="ec-week-summary">
+        {{ calendar.event_day_count }} event-day(s) ·
+        {{ calendar.entry_count }} truck/unit-day assignment(s) this week
+    </p>
+    <div class="ec-week-scroll" role="region" aria-label="Seven-day event schedule" tabindex="0">
+        <div class="ec-week-grid">
+            {% for day in calendar.days %}
+                <section class="ec-week-day{% if day.today %} is-today{% endif %}"
+                         aria-label="{{ day.label }}">
+                    <div class="ec-week-day-header">
+                        <span class="ec-week-weekday">{{ day.weekday }}</span>
+                        <a class="ec-week-date-number"
+                           href="{{ url_for('event_new', date=day.iso) }}"
+                           aria-label="Add event on {{ day.label }}">{{ day.number }}</a>
+                        <span class="ec-week-date-caption">{{ day.date.strftime('%b %Y') }}</span>
+                    </div>
+                    <p class="ec-week-day-total">
+                        {{ day.assignment_count }} truck/unit assignment(s)
+                    </p>
+                    {% for item in day.entries %}
+                        <button type="button"
+                                class="ec-week-event{% if item.is_cancelled %} is-cancelled{% endif %}"
+                                data-details-url="{{ url_for('peachpos_event_calendar_details', event_id=item.event_id) }}"
+                                style="background-color: {{ item.color }}; color: {{ item.text_color }};"
+                                title="{{ item.name }} — {{ item.unit }} — {{ item.hours }}">
+                            <span class="ec-week-event-name">{{ item.name }}</span>
+                            <span class="ec-week-event-unit">{{ item.unit }}</span>
+                            <span class="ec-week-event-hours">{{ item.hours }}</span>
+                            {% if item.venue %}
+                                <span class="ec-week-event-venue">{{ item.venue }}</span>
+                            {% endif %}
+                            {% if item.location %}
+                                <span class="ec-week-event-location">{{ item.location }}</span>
+                            {% endif %}
+                            {% if item.is_cancelled %}
+                                <span class="ec-week-event-status">Cancelled</span>
+                            {% endif %}
+                        </button>
+                    {% else %}
+                        <p class="ec-week-empty">No scheduled events</p>
+                    {% endfor %}
+                </section>
+            {% endfor %}
+        </div>
+    </div>
+    <p class="ec-week-footnote">
+        Each card represents one physical unit on an operating day. Selecting a card
+        opens Event Details. Select a date number to add an event on that day.
+        This calendar does not change scheduled events.
+    </p>
+<style>
+/* Read-only Event Details modal */
+.ec-week-event {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    font-family: inherit;
+    cursor: pointer;
+}
+.ec-week-event:hover {
+    filter: brightness(0.96);
+}
+.ec-week-event:focus-visible {
+    outline: 3px solid #173c7c;
+    outline-offset: 2px;
+}
+.ec-detail-dialog {
+    width: min(660px, calc(100vw - 30px));
+    max-height: min(85vh, 900px);
+    padding: 0;
+    margin: auto;
+    border: 1px solid #ded7d1;
+    border-radius: 16px;
+    background: #fffaf6;
+    color: #3c3432;
+    box-shadow: 0 18px 60px rgba(25, 20, 20, 0.26);
+}
+.ec-detail-dialog::backdrop {
+    background: rgba(25, 28, 34, 0.55);
+}
+.ec-detail-shell {
+    padding: 24px;
+}
+.ec-detail-heading {
+    margin: 0;
+    color: #6b4e53;
+    font-size: 1.45rem;
+}
+.ec-detail-subtitle {
+    margin-top: 6px;
+    color: #756a65;
+    font-size: 0.9rem;
+}
+.ec-detail-content {
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 5px 2px;
+}
+.ec-detail-section {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid #e8dfd7;
+}
+.ec-detail-section h3 {
+    margin: 0 0 9px;
+    color: #705257;
+    font-size: 1rem;
+}
+.ec-detail-line {
+    margin: 5px 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.ec-detail-day {
+    padding: 14px;
+    margin: 12px 0;
+    background: #f7f1eb;
+    border: 1px solid #e8dfd7;
+    border-radius: 11px;
+}
+.ec-detail-day h4 {
+    margin: 0 0 8px;
+    font-size: 0.98rem;
+}
+.ec-detail-unit {
+    display: inline-block;
+    padding: 6px 10px;
+    margin: 5px 6px 5px 0;
+    border-radius: 7px;
+    font-size: 0.85rem;
+    font-weight: 650;
+}
+.ec-detail-employee {
+    padding: 8px 0;
+    border-bottom: 1px solid #e4dbd2;
+}
+.ec-detail-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 18px;
+}
+.ec-detail-close {
+    min-width: 95px;
+}
+
+</style>
+<style>
+#ec-detail-dialog .ec-detail-section.ec-detail-history {
+    background: #F8F0EA;
+    border: 1px solid #EADBD2;
+    border-left: 4px solid #86616B;
+    border-radius: 10px;
+    padding: 14px 17px;
+    margin-top: 16px;
+    margin-bottom: 16px;
+}
+#ec-detail-dialog .ec-detail-history h3 { margin-top: 0; }
+#ec-detail-dialog .ec-detail-history p { margin-bottom: 0; }
+</style>
+<dialog id="ec-detail-dialog"
+        class="ec-detail-dialog"
+        aria-labelledby="ec-detail-name"
+        aria-describedby="ec-detail-subtitle">
+    <div class="ec-detail-shell">
+        <h2 id="ec-detail-name" class="ec-detail-heading">
+            Event Details
+        </h2>
+        <p id="ec-detail-subtitle" class="ec-detail-subtitle"></p>
+        <div id="ec-detail-content"
+             class="ec-detail-content"
+             aria-live="polite"></div>
+        <p id="ec-detail-edit-message"
+           class="ec-detail-subtitle"
+           role="status" aria-live="polite"></p>
+        <input type="hidden" id="ec-calendar-edit-csrf"
+               value="{{ event_csrf_token }}">
+        <div class="ec-detail-footer">
+            <button type="button" id="ec-detail-edit"
+                    class="btn" hidden>Edit Event</button>
+            <button type="button" id="ec-detail-copy"
+                    class="btn" hidden>Copy Event</button>
+            <button type="button"
+                    id="ec-detail-close"
+                    class="btn ec-detail-close">
+                Close
+            </button>
+        </div>
+    </div>
+</dialog>
+</section>
+<script>
+(function () {
+    "use strict";
+
+    const dialog = document.getElementById("ec-detail-dialog");
+    const heading = document.getElementById("ec-detail-name");
+    const subtitle = document.getElementById("ec-detail-subtitle");
+    const content = document.getElementById("ec-detail-content");
+    const closeButton = document.getElementById("ec-detail-close");
+    const editButton = document.getElementById("ec-detail-edit");
+    const copyButton = document.getElementById("ec-detail-copy");
+    const editMessage = document.getElementById("ec-detail-edit-message");
+    const editCsrf = document.getElementById("ec-calendar-edit-csrf");
+    let activeEventButton = null;
+    let activeEventId = null;
+
+    let currentRequest = 0;
+    let previousFocus = null;
+
+    function element(tag, className, value) {
+        const node = document.createElement(tag);
+
+        if (className) {
+            node.className = className;
+        }
+
+        if (value !== undefined && value !== null) {
+            node.textContent = String(value);
+        }
+
+        return node;
+    }
+
+    function line(parent, value) {
+        if (value !== undefined && value !== null &&
+            String(value).trim()) {
+            parent.appendChild(
+                element("p", "ec-detail-line", value)
+            );
+        }
+    }
+
+    function section(title) {
+        const node = element("section", "ec-detail-section");
+        node.appendChild(element("h3", "", title));
+        content.appendChild(node);
+        return node;
+    }
+
+    function displayDate(iso) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""))) {
+            return String(iso || "Date unavailable");
+        }
+
+        const date = new Date(iso + "T12:00:00");
+
+        if (Number.isNaN(date.getTime())) {
+            return iso;
+        }
+
+        return new Intl.DateTimeFormat("en-US", {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+            year: "numeric"
+        }).format(date);
+    }
+
+    function addressText(address) {
+        const a = address || {};
+        const cityState = [a.city, a.state]
+            .filter(Boolean).join(", ");
+        const locality = [cityState, a.zip_code]
+            .filter(Boolean).join(" ");
+
+        return [a.street, a.line2, locality]
+            .filter(Boolean).join("\n");
+    }
+
+    function renderDetails(event) {
+        if (!event || !Array.isArray(event.days)) {
+            throw new Error("Invalid event details response.");
+        }
+
+        heading.textContent = event.name || "Event Details";
+        subtitle.textContent =
+            "Event #" + event.event_id +
+            " · " + (event.status || "Status unavailable");
+
+        content.replaceChildren();
+
+        const location = section("Venue & Location");
+        line(location, event.venue || "Venue not specified");
+        line(location, addressText(event.address) || "Address unavailable");
+
+        const dates = section("Event Dates");
+        if (event.start_date && event.end_date) {
+            const start = displayDate(event.start_date);
+            const end = displayDate(event.end_date);
+            line(dates, start === end ? start : start + " – " + end);
+        }
+
+        // Server formats this text in the business time zone.
+        // Treat saved administrator names as text, never as HTML.
+        const history = section("Event History");
+        history.classList.add("ec-detail-history");
+        line(history, event.history_text || "Event history unavailable.");
+
+        const schedule = section("Daily Operating Schedule");
+
+        if (!event.days.length) {
+            line(schedule, "No daily operating schedule recorded.");
+        }
+
+        for (const day of event.days) {
+            const dayBox = element("div", "ec-detail-day");
+            dayBox.appendChild(
+                element("h4", "", displayDate(day.date))
+            );
+
+            const hours = day.opens && day.closes
+                ? day.opens + " – " + day.closes
+                : "Hours not available";
+
+            line(dayBox, "Operating hours: " + hours);
+
+            const units = Array.isArray(day.units) ? day.units : [];
+
+            if (units.length) {
+                line(dayBox, "Assigned equipment:");
+
+                for (const unit of units) {
+                    const badge = element(
+                        "span", "ec-detail-unit",
+                        unit.name || "Unnamed Event Unit"
+                    );
+
+                    badge.style.backgroundColor =
+                        /^#[0-9a-fA-F]{6}$/.test(unit.color || "")
+                            ? unit.color
+                            : "#64748B";
+
+                    badge.style.color =
+                        unit.text_color === "#17212B"
+                            ? "#17212B"
+                            : "#FFFFFF";
+
+                    dayBox.appendChild(badge);
+                }
+            } else {
+                line(dayBox, "No equipment assigned.");
+            }
+
+            const employees = Array.isArray(day.employees)
+                ? day.employees : [];
+
+            const employeeHeading = element(
+                "h4", "", "Employee Assignments"
+            );
+            employeeHeading.style.marginTop = "15px";
+            dayBox.appendChild(employeeHeading);
+
+            if (!employees.length) {
+                line(dayBox, "No employees scheduled for this day.");
+            }
+
+            for (const employee of employees) {
+                const employeeBox = element(
+                    "div", "ec-detail-employee"
+                );
+
+                employeeBox.appendChild(
+                    element("strong", "", employee.name || "Employee")
+                );
+
+                const shift = [
+                    employee.starts && employee.ends
+                        ? employee.starts + " – " + employee.ends
+                        : "",
+                    employee.role,
+                    employee.unit
+                ].filter(Boolean).join(" · ");
+
+                line(employeeBox, shift);
+                line(employeeBox, employee.notes);
+                dayBox.appendChild(employeeBox);
+            }
+
+            if (day.notes) {
+                line(dayBox, "Daily notes: " + day.notes);
+            }
+
+            schedule.appendChild(dayBox);
+        }
+
+        if (Array.isArray(event.notes) && event.notes.length) {
+            const notes = section("Event Notes");
+
+            for (const note of event.notes) {
+                line(notes, note);
+            }
+        }
+    }
+
+    async function openDetails(button) {
+        previousFocus = button;
+        activeEventButton = null;
+        activeEventId = null;
+        editButton.hidden = true;
+        copyButton.hidden = true;
+        editMessage.textContent = "";
+        const requestNumber = ++currentRequest;
+
+        heading.textContent = "Event Details";
+        subtitle.textContent = "Loading saved event...";
+        content.replaceChildren();
+
+        if (!dialog.open) {
+            dialog.showModal();
+        }
+
+        try {
+            const response = await fetch(
+                button.dataset.detailsUrl,
+                {
+                    method: "GET",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: {
+                        "Accept": "application/json"
+                    }
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error("Could not retrieve event.");
+            }
+
+            const payload = await response.json();
+
+            if (!payload || payload.ok !== true) {
+                throw new Error("Invalid event details.");
+            }
+
+            if (requestNumber === currentRequest && dialog.open) {
+                renderDetails(payload.event);
+                const eventId = Number(payload.event && payload.event.event_id);
+                if (Number.isSafeInteger(eventId) && eventId > 0) {
+                    activeEventButton = button;
+                    activeEventId = eventId;
+                    editButton.hidden = false;
+                    copyButton.hidden = false;
+                }
+            }
+        } catch (_error) {
+            if (requestNumber === currentRequest && dialog.open) {
+                subtitle.textContent = "";
+                content.replaceChildren();
+
+                line(
+                    content,
+                    "Unable to load event details. " +
+                    "Close this window and try again."
+                );
+            }
+        }
+    }
+
+    document.querySelectorAll(
+        ".ec-week-event[data-details-url]"
+    ).forEach(function (button) {
+        button.addEventListener("click", function () {
+            openDetails(button);
+        });
+    });
+
+
+    // Opening the edit page is only a read. No lock, session, or lease.
+    editButton.addEventListener("click", function () {
+        if (!activeEventId || !activeEventButton || !dialog.open) return;
+        const editUrl = new URL(
+            "{{ url_for('event_new') }}", window.location.href
+        );
+        editUrl.searchParams.set("edit", String(activeEventId));
+        window.location.assign(editUrl.href);
+    });
+
+    copyButton.addEventListener("click", function () {
+        if (!activeEventId || !activeEventButton || !dialog.open) return;
+        const copyUrl = new URL(
+            "{{ url_for('event_new') }}", window.location.href
+        );
+        copyUrl.searchParams.set("copy", String(activeEventId));
+        window.location.assign(copyUrl.href);
+    });
+
+    closeButton.addEventListener("click", function () {
+        dialog.close();
+    });
+
+    // Close when clicking the calendar outside the modal.
+    // Clicking inside the modal must not dismiss it.
+    dialog.addEventListener("click", function (event) {
+        if (event.target !== dialog) {
+            return;
+        }
+
+        const bounds = dialog.getBoundingClientRect();
+
+        const outside = (
+            event.clientX < bounds.left ||
+            event.clientX > bounds.right ||
+            event.clientY < bounds.top ||
+            event.clientY > bounds.bottom
+        );
+
+        if (outside) {
+            dialog.close();
+        }
+    });
+
+    dialog.addEventListener("close", function () {
+        currentRequest += 1;
+
+        if (previousFocus) {
+            previousFocus.focus();
+        }
+    });
+})();
+</script>
+{% endblock %}

@@ -79,6 +79,7 @@
         <a class="is-active" aria-current="page"
            href="{{ url_for('peachpos_event_calendar_year', year=calendar.year) }}">Year</a>
         <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=current_month) }}">Month</a>
+        <a href="{{ url_for('peachpos_event_calendar_week', year=calendar.year, month=current_month) }}">Week</a>
     </nav>
 
     <div class="ec-year-toolbar">

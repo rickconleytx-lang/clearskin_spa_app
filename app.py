@@ -130188,6 +130188,78 @@ def peachpos_event_calendar_month():
 # PeachPOS Event Calendar — protected read-only details
 # ==========================================================
 
+@app.route("/events/calendar/week", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_calendar_week():
+    """Read-only seven-day Event Calendar for the authenticated workspace."""
+    import re
+    from datetime import date
+    from flask import abort, make_response, render_template, request
+    from services.event_calendar_read import list_event_calendar_rows
+    from services.event_calendar_week import build_week_view, week_bounds
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    today = date.today()
+    args = request.args
+    if "date" in args:
+        if "year" in args or "month" in args:
+            abort(400)
+        value = args["date"]
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+            abort(400)
+        try:
+            anchor = date.fromisoformat(value)
+        except ValueError:
+            abort(400)
+    elif "year" in args or "month" in args:
+        if "year" not in args or "month" not in args:
+            abort(400)
+        try:
+            year = int(args["year"])
+            month = int(args["month"])
+        except (ValueError, TypeError):
+            abort(400)
+        if not 2000 <= year <= 2100 or not 1 <= month <= 12:
+            abort(400)
+        day = today.day if year == today.year and month == today.month else 1
+        anchor = date(year, month, day)
+    else:
+        anchor = today
+
+    if not 2000 <= anchor.year <= 2100:
+        abort(400)
+
+    week_start, week_end = week_bounds(anchor)
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+        rows = list_event_calendar_rows(
+            conn, spa_id, workspace_id, week_start, week_end
+        )
+        calendar_data = build_week_view(rows, anchor, today)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(render_template(
+        "event_calendar_week.html",
+        calendar=calendar_data,
+        event_csrf_token=_security_form_csrf_token(),
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @app.route("/events/calendar/year", methods=["GET"])
 @login_required
 @spa_required

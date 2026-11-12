@@ -20,6 +20,7 @@ ROUTE = SOURCE[START:END]
 def url_for(endpoint, **kw):
     paths = {
         'peachpos_event_calendar_year': '/events/calendar/year',
+        'peachpos_event_calendar_week': '/events/calendar/week',
         'peachpos_event_calendar_month': '/events/calendar',
         'event_new': '/events/new',
         'event_units_home': '/events/units',
