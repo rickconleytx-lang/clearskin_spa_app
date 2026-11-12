@@ -339,6 +339,11 @@ def update_event_draft(
             "Editing requires one database transaction."
         )
 
+    has_next_occurrence = (
+        type(payload) is dict and type(payload.get("event")) is dict
+        and "next_occurrence" in payload["event"]
+    )
+
     try:
         with conn.cursor() as cur:
             # Serialize saves on this event row; no editing lease.
@@ -350,6 +355,7 @@ def update_event_draft(
             before = load_event_edit_payload(
                 conn, event_id=event_id,
                 spa_id=spa_id, workspace_id=workspace_id,
+                **({"include_next_occurrence": True} if has_next_occurrence else {}),
             )
             if before is None:
                 raise EventEditUpdateConflict(
@@ -398,9 +404,18 @@ def update_event_draft(
                 cur, normalized, spa_id, workspace_id, event_id,
             )
 
+            if has_next_occurrence:
+                from services.event_calendar_view_events import upsert_next_occurrence
+                upsert_next_occurrence(
+                    cur, spa_id=spa_id, workspace_id=workspace_id,
+                    event_id=event_id,
+                    reference=normalized["event"]["next_occurrence"],
+                )
+
             after = load_event_edit_payload(
                 conn, event_id=event_id,
                 spa_id=spa_id, workspace_id=workspace_id,
+                **({"include_next_occurrence": True} if has_next_occurrence else {}),
             )
             if after is None or after["event_revision"] != revision_after:
                 raise EventEditUpdateError(

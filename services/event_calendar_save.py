@@ -484,6 +484,16 @@ def save_event_draft(
                 cur, normalized, spa_id, workspace_id, actor_id
             )
 
+            # Reference metadata is in the SAME idempotent creation transaction.
+            # Blank/omitted references need no metadata row.
+            next_occurrence = normalized["event"].get("next_occurrence", "")
+            if next_occurrence:
+                from services.event_calendar_view_events import upsert_next_occurrence
+                upsert_next_occurrence(
+                    cur, spa_id=spa_id, workspace_id=workspace_id,
+                    event_id=event_id, reference=next_occurrence,
+                )
+
             counts = _create_schedules(
                 cur, normalized, spa_id, workspace_id,
                 actor_id, event_id,

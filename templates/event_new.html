@@ -343,6 +343,18 @@
                 <input type="date" id="end_date" required aria-required="true">
             </div>
 
+            <div class="ec-field ec-wide">
+                <label for="next_occurrence">Next Occurrence (Optional)</label>
+                <input type="text" id="next_occurrence" maxlength="120"
+                       autocomplete="off" placeholder="Oct 5, Oct 5-8, 10/5-8"
+                       aria-describedby="ec-next-occurrence-help">
+                <p class="ec-note" id="ec-next-occurrence-help">
+                    Anticipated date of this event's next occurrence, if known.
+                    <strong>Enter it when you know it. Update it when you learn it.</strong>
+                    This is only a reference; it does not schedule another event or reminder.
+                </p>
+            </div>
+
             <div class="ec-field">
                 <label for="event_status">Event Status</label>
                 <select id="event_status">
@@ -1913,6 +1925,7 @@
                         event_name: eventData.name,
                         start_date: eventData.start_date,
                         end_date: eventData.end_date,
+                        next_occurrence: "",
                         venue_name: eventData.venue_name,
                         street_address: eventData.street_address,
                         address_line2: eventData.address_line2,
@@ -2087,6 +2100,7 @@
                     event_name: eventData.name,
                     start_date: eventData.start_date,
                     end_date: eventData.end_date,
+                    next_occurrence: eventData.next_occurrence || "",
                     venue_name: eventData.venue_name,
                     street_address: eventData.street_address,
                     address_line2: eventData.address_line2,
@@ -2415,6 +2429,7 @@
                 name: fieldValue("event_name"),
                 start_date: fieldValue("start_date"),
                 end_date: fieldValue("end_date"),
+                next_occurrence: fieldValue("next_occurrence"),
                 status: fieldValue("event_status").toLowerCase(),
                 include_on_peachweb:
                     fieldChecked("include_on_peachweb"),

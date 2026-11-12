@@ -163,6 +163,19 @@ def validate_event_payload(payload, timezone_name):
 
     event = {}
 
+    # A flexible reference only; not parsed into event dates or reservations.
+    # Omitted by older clients, and never implicitly clears existing metadata.
+    if "next_occurrence" in raw_event:
+        from services.event_calendar_view_events import (
+            ViewEventsError, validate_next_date_reference,
+        )
+        try:
+            event["next_occurrence"] = validate_next_date_reference(
+                raw_event["next_occurrence"]
+            )
+        except ViewEventsError as exc:
+            raise EventValidationError(str(exc)) from exc
+
     for key, (limit, required) in FIELD_LIMITS.items():
         event[key] = read_text(
             raw_event, key, limit, required

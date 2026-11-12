@@ -129,7 +129,8 @@ class OptimisticHttpTests(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["event"]["event_revision"], 2)
         loader.assert_called_once_with(self.conn, event_id=12, spa_id=44,
-                                       workspace_id=41)
+                                       workspace_id=41,
+                                       include_next_occurrence=True)
         self.assertEqual(self.conn.sessions[0], {
             "readonly": True, "isolation_level": "REPEATABLE READ",
             "autocommit": False,

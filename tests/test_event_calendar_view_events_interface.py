@@ -121,7 +121,7 @@ class ViewEventsPageContract(unittest.TestCase):
             self.assertIn(f'name="{field}"', PAGE)
 
     def test_columns(self):
-        for title in ('Date', 'Event', 'City', 'Contact Name', 'Next Date', 'Actions'):
+        for title in ('Date', 'Event', 'City', 'Contact Name', 'Next Occurrence', 'Actions'):
             self.assertIn(f'>{title}</th>', PAGE)
 
     def test_view_and_edit_links_exist(self):
@@ -163,7 +163,7 @@ class ViewEventsPageContract(unittest.TestCase):
 
     def test_reference_boundary_text(self):
         result = render_page()
-        self.assertIn('Next Date is a flexible planning reference only', result)
+        self.assertIn('Next Occurrence is a flexible planning reference only', result)
         self.assertIn('does not create an', result)
         self.assertIn('Business Schedule reminder', result)
 

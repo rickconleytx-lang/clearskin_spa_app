@@ -130946,6 +130946,7 @@ def peachpos_event_edit_draft(event_id):
             event_id=event_id,
             spa_id=spa_id,
             workspace_id=workspace_id,
+            include_next_occurrence=True,
         )
 
         if draft is None:

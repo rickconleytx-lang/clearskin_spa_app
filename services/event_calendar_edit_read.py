@@ -73,7 +73,7 @@ def _text(value):
     return "" if value is None else str(value)
 
 
-def load_event_edit_payload(conn, *, event_id, spa_id, workspace_id):
+def load_event_edit_payload(conn, *, event_id, spa_id, workspace_id, include_next_occurrence=False):
     """Return a form-compatible event draft, or None outside this scope.
 
     No writes, no lock acquisition and no commits. The endpoint must
@@ -102,6 +102,18 @@ def load_event_edit_payload(conn, *, event_id, spa_id, workspace_id):
 
         if saved is None:
             return None
+
+        # Opt-in for new editor and edit-save paths only. Legacy readers,
+        # including Copy Event, retain their existing query contract.
+        next_occurrence = ""
+        if include_next_occurrence:
+            cur.execute(
+                "SELECT next_date_reference FROM public.event_calendar_view_metadata "
+                "WHERE spa_id = %s AND business_unit_id = %s AND event_id = %s",
+                scope,
+            )
+            meta = cur.fetchone()
+            next_occurrence = _text(meta[0]) if meta else ""
 
         start = saved["start_date"]
         end = saved["end_date"]
@@ -299,7 +311,7 @@ def load_event_edit_payload(conn, *, event_id, spa_id, workspace_id):
                 record["field_label_snapshot"]
             )
 
-        return {
+        result = {
             "event_id": saved["event_id"],
             "event_revision": saved["event_revision"],
             "timezone_name": saved["timezone_name"],
@@ -333,6 +345,9 @@ def load_event_edit_payload(conn, *, event_id, spa_id, workspace_id):
             "custom_labels": labels,
             "days": list(days.values()),
         }
+        if include_next_occurrence:
+            result["event"]["next_occurrence"] = next_occurrence
+        return result
 
     finally:
         cur.close()

@@ -51,6 +51,40 @@ def validate_next_date_reference(value):
     return value
 
 
+def upsert_next_occurrence(cur, *, spa_id, workspace_id, event_id, reference):
+    """Store a reference in the caller's existing event-save transaction.
+
+    Does not commit or modify event scheduling. The event must belong to
+    the authenticated business and workspace. Existing archive data remains.
+    """
+    for value in (spa_id, workspace_id, event_id):
+        if type(value) is not int or value <= 0:
+            raise ViewEventsError("Invalid Next Occurrence event scope.")
+    reference = validate_next_date_reference(reference)
+    cur.execute(
+        """
+        INSERT INTO public.event_calendar_view_metadata
+            (event_id, spa_id, business_unit_id, next_date_reference)
+        SELECT e.event_id, e.spa_id, e.business_unit_id, %s
+          FROM public.event_calendar_events AS e
+         WHERE e.spa_id = %s
+           AND e.business_unit_id = %s
+           AND e.event_id = %s
+        ON CONFLICT (event_id) DO UPDATE SET
+            next_date_reference = EXCLUDED.next_date_reference,
+            updated_at = NOW()
+        WHERE event_calendar_view_metadata.spa_id = EXCLUDED.spa_id
+          AND event_calendar_view_metadata.business_unit_id = EXCLUDED.business_unit_id
+        RETURNING event_id
+        """,
+        (reference, spa_id, workspace_id, event_id),
+    )
+    row = cur.fetchone()
+    if row is None or int(row[0]) != event_id:
+        raise ViewEventsError("Next Occurrence could not be saved in this workspace.")
+    return reference
+
+
 def _validated_date(value, field):
     if value is None:
         return None
