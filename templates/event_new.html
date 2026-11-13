@@ -258,7 +258,7 @@
             {% if event_copy_id %}
             <a href="{{ url_for('peachpos_event_calendar_month') }}">Back to Event Calendar</a>
             {% else %}
-            <a href="{{ url_for('admin') }}">Back to Calendar Settings</a>
+            <a href="{{ url_for('peachpos_event_calendar_year') }}">Back to Event Calendar</a>
             {% endif %}
             {% endif %}
     </p>
@@ -789,6 +789,7 @@
             <div class="ec-field ec-wide">
                 <label for="notes_2">Notes 2 — Internal Team Notes</label>
                 <textarea id="notes_2" rows="3"></textarea>
+                <a href="{{ url_for('admin') }}#event-custom-fields">Manage Event Custom Fields</a>
             </div>
         </div>
     </section>

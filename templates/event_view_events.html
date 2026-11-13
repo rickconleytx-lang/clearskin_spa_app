@@ -8,7 +8,8 @@
     gap: 16px; flex-wrap: wrap; margin: 3px 0 20px; }
 .ec-view-heading h1 { margin: 0 0 6px; }
 .ec-view-heading p { margin: 0; color: #6f6662; }
-.ec-view-heading-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+.ec-view-heading-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 9px; }
+.ec-view-heading-primary { display: flex; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
 .ec-view-heading-actions a, .ec-view-action, .ec-view-pager a,
 .ec-view-filters button, .ec-view-filters .ec-view-clear {
     display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
@@ -70,9 +71,11 @@
             <p>Review your event history, organizer contacts, and future event references.</p>
         </div>
         <nav class="ec-view-heading-actions" aria-label="Event navigation">
-            <a href="{{ url_for('peachpos_event_calendar_month') }}">Event Calendar</a>
-            <a href="{{ url_for('event_new') }}">Add Event</a>
-            <a href="{{ url_for('event_units_home') }}">Event Units</a>
+            <div class="ec-view-heading-primary">
+                <a href="{{ url_for('peachpos_event_calendar_month') }}">Event Calendar</a>
+                <a href="{{ url_for('event_new') }}">Add Event</a>
+            </div>
+            <a href="{{ url_for('event_units_home') }}">Manage Event Units</a>
         </nav>
     </div>
 

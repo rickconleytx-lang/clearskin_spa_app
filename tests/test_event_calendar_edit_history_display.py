@@ -104,7 +104,8 @@ class EventHistoryDisplayTests(unittest.TestCase):
         self.assertIn("url_for('peachpos_event_calendar_month')", code)
         self.assertIn("Back to Event Calendar", code)
         self.assertIn("url_for('admin')", code)
-        self.assertIn("Back to Calendar Settings", code)
+        self.assertIn("Back to Event Calendar", code)
+        self.assertIn("url_for('peachpos_event_calendar_year')", code)
         self.assertIn("{% if event_edit_id %}", code)
 
     def test_save_labels_change_without_affecting_create(self):
