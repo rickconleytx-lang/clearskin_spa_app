@@ -49,6 +49,7 @@ def render_page(*, event_name="Keller Fall Festival", next_date="Oct 5-8",
         status="",
         search="",
         archive_mode="active",
+        event_csrf_token="test-csrf-token",
         url_for=lambda endpoint, **kwargs: "/" + endpoint,
     )
 
@@ -129,10 +130,11 @@ class ViewEventsPageContract(unittest.TestCase):
         self.assertIn("url_for('event_new', edit=event.event_id)", PAGE)
         self.assertIn('>Go To Month</a>', PAGE)
 
-    def test_no_unsupported_actions_or_post_form(self):
+    def test_only_supported_archive_post_forms(self):
         self.assertNotIn('Create Reminder</', PAGE)
-        self.assertNotIn('>Archive</', PAGE)
-        self.assertNotIn('method="POST"', PAGE)
+        self.assertIn('method="POST"', PAGE)
+        self.assertIn("url_for('peachpos_event_archive'", PAGE)
+        self.assertIn("url_for('peachpos_event_restore'", PAGE)
         self.assertNotIn('fetch(', PAGE)
         self.assertNotIn('onclick=', PAGE)
 

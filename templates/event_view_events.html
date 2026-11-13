@@ -48,6 +48,9 @@
     border-radius: 6px; padding: 3px 7px; margin-top: 5px; font-size: .77rem; }
 .ec-view-actions { display: flex; gap: 6px; flex-wrap: wrap; white-space: nowrap; }
 .ec-view-action { padding: 6px 10px; font-size: .82rem; }
+.ec-view-action-form { margin: 0; display: inline-flex; }
+.ec-view-action-form button { font-family: inherit; }
+.ec-view-action-archive { color: #75545e; }
 .ec-view-empty { text-align: center; padding: 35px 15px !important;
     color: #70655f !important; }
 .ec-view-pager { display: flex; justify-content: space-between; align-items: center;
@@ -113,6 +116,10 @@
 
     <p class="ec-view-note">Next Occurrence is a flexible planning reference only. It does not create an
         Event Calendar booking or a Business Schedule reminder.</p>
+    <p class="ec-view-note">Archive preserves the event record but removes its truck/equipment
+        and employee assignments, unchecks PeachWeb, and hides it from the normal calendar.
+        Choose Archived in the View filter to restore the record; assignments and PeachWeb
+        will not automatically return.</p>
 
     <div class="ec-view-table-scroll" role="region" aria-label="Event list" tabindex="0">
         <table class="ec-view-table">
@@ -147,6 +154,18 @@
                         <div class="ec-view-actions">
                             <a class="ec-view-action" href="{{ url_for('peachpos_event_calendar_month', year=event.start_date.year, month=event.start_date.month) }}">Go To Month</a>
                             <a class="ec-view-action" href="{{ url_for('event_new', edit=event.event_id) }}">Edit</a>
+                            {% if event.is_archived %}
+                            <form class="ec-view-action-form" method="POST" action="{{ url_for('peachpos_event_restore', event_id=event.event_id) }}">
+                                <input type="hidden" name="security_csrf_token" value="{{ event_csrf_token }}">
+                                <button class="ec-view-action" type="submit">Restore</button>
+                            </form>
+                            {% else %}
+                            <form class="ec-view-action-form ec-view-archive-form" method="POST" action="{{ url_for('peachpos_event_archive', event_id=event.event_id) }}">
+                                <input type="hidden" name="security_csrf_token" value="{{ event_csrf_token }}">
+                                <input type="hidden" name="archive_acknowledged" value="1">
+                                <button class="ec-view-action ec-view-action-archive" type="submit">Archive</button>
+                            </form>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>
@@ -169,4 +188,22 @@
         </div>
     </nav>
 </section>
+<script>
+(function () {
+    "use strict";
+    document.querySelectorAll(".ec-view-archive-form").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+            if (!window.confirm(
+                "Archive this event? This removes ALL trucks/equipment assignments, " +
+                "employee assignments and shifts from THIS EVENT, and unchecks " +
+                "Include on PeachWeb. It also hides the event on the normal calendar. " +
+                "The event details and Next Occurrence will be preserved. " +
+                "Restoring will NOT automatically bring back assignments or PeachWeb visibility."
+            )) {
+                event.preventDefault();
+            }
+        });
+    });
+})();
+</script>
 {% endblock %}

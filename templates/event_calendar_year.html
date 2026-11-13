@@ -17,6 +17,18 @@
 .ec-calendar-view-switch a:hover { background: #eee3dc; }
 .ec-calendar-view-switch a.is-active { background: #75545e; color: white; }
 .ec-calendar-view-switch a:focus-visible { outline: 3px solid #207c78; outline-offset: 2px; }
+/* Archived overlays contain event name + Archived only. */
+.ec-archived-event { display: block; width: 100%; box-sizing: border-box;
+    border-radius: 7px; padding: 7px 8px; margin: 7px 0;
+    background: #e6e6e6 !important; color: #505050 !important;
+    border: 1px solid #c8c8c8; cursor: default; text-align: left;
+    font-size: .78rem; line-height: 1.4; overflow-wrap: anywhere; }
+.ec-archived-event strong { display: block; }
+.ec-archived-event span { display: block; margin-top: 3px; }
+.ec-show-archived { display: inline-flex; align-items: center;
+    border: 1px solid #aaa; border-radius: 8px; padding: 8px 12px;
+    background: #fff; text-decoration: none; font-weight: 650; color: #555; }
+.ec-show-archived.is-active { background: #e6e6e6; border-color: #888; }
 .ec-year-toolbar { display: flex; align-items: center; justify-content: space-between;
     flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
 .ec-year-toolbar h2 { margin: 0; font-size: 1.6rem; }
@@ -49,6 +61,10 @@
 .ec-year-date.is-active { background: #d8eeea; border-color: #92c6bd;
     color: #175950; font-weight: 800; }
 .ec-year-date.is-active:hover { background: #bce1d9; }
+ .ec-year-date.is-archived { background: #e6e6e6; border-color: #c8c8c8;
+    color: #505050; }
+.ec-year-archive-dot { position: absolute; left: 2px; bottom: 2px;
+    width: 6px; height: 6px; border-radius: 50%; background: #969696; }
 .ec-year-date.is-cancelled { border: 1px dashed #d5ab6e;
     background: #fff6e8; color: #8a6438; }
 .ec-year-date.is-today { outline: 2px solid #75545e; outline-offset: -2px; }
@@ -71,26 +87,30 @@
         </div>
         <div class="ec-year-actions">
             <a class="btn" href="{{ url_for('event_new') }}">Add Event</a>
+            <a class="btn" href="{{ url_for('peachpos_view_events') }}">View Events</a>
             <a class="btn" href="{{ url_for('event_units_home') }}">Manage Event Units</a>
         </div>
     </div>
 
+    <p><a class="ec-show-archived{% if show_archived %} is-active{% endif %}"
+           href="{{ url_for('peachpos_event_calendar_year', year=calendar.year, show_archived=0 if show_archived else 1) }}"
+           aria-pressed="{{ 'true' if show_archived else 'false' }}">{{ 'Hide Archived' if show_archived else 'Show Archived' }}</a></p>
     <nav class="ec-calendar-view-switch" aria-label="Event calendar views">
         <a class="is-active" aria-current="page"
-           href="{{ url_for('peachpos_event_calendar_year', year=calendar.year) }}">Year</a>
-        <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=current_month) }}">Month</a>
-        <a href="{{ url_for('peachpos_event_calendar_week', year=calendar.year, month=current_month) }}">Week</a>
+           href="{{ url_for('peachpos_event_calendar_year', year=calendar.year, show_archived=1 if show_archived else None) }}">Year</a>
+        <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=current_month, show_archived=1 if show_archived else None) }}">Month</a>
+        <a href="{{ url_for('peachpos_event_calendar_week', year=calendar.year, month=current_month, show_archived=1 if show_archived else None) }}">Week</a>
     </nav>
 
     <div class="ec-year-toolbar">
         <h2>{{ calendar.label }}</h2>
         <nav class="ec-year-navigation" aria-label="Calendar years">
             {% if calendar.previous_year is not none %}
-            <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.previous_year) }}">Previous Year</a>
+            <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.previous_year, show_archived=1 if show_archived else None) }}">Previous Year</a>
             {% else %}<span class="is-disabled" aria-disabled="true">Previous Year</span>{% endif %}
-            <a href="{{ url_for('peachpos_event_calendar_year') }}">This Year</a>
+            <a href="{{ url_for('peachpos_event_calendar_year', show_archived=1 if show_archived else None) }}">This Year</a>
             {% if calendar.next_year is not none %}
-            <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.next_year) }}">Next Year</a>
+            <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.next_year, show_archived=1 if show_archived else None) }}">Next Year</a>
             {% else %}<span class="is-disabled" aria-disabled="true">Next Year</span>{% endif %}
         </nav>
     </div>
@@ -108,7 +128,7 @@
         {% for month in calendar.months %}
         <section class="ec-year-month" aria-label="{{ month.name }} {{ calendar.year }}">
             <div class="ec-year-month-heading">
-                <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=month.number) }}">
+                <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=month.number, show_archived=1 if show_archived else None) }}">
                     {{ month.name }}
                 </a>
                 <span class="ec-year-month-total">{{ month.event_days }} event-day(s)</span>
@@ -125,12 +145,20 @@
                         <span class="ec-year-date is-outside" aria-hidden="true"></span>
                         {% elif day.events > 0 %}
                         <a class="ec-year-date is-active{% if day.today %} is-today{% endif %}"
-                           href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=month.number) }}"
+                           href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=month.number, show_archived=1 if show_archived else None) }}"
                            title="{{ day.date.strftime('%B %d, %Y') }}: {{ day.events }} event(s), {{ day.units }} unit(s)"
                            aria-label="{{ day.date.strftime('%B %d, %Y') }}: {{ day.events }} event(s), {{ day.units }} unit(s). Open Month View.">
                             {{ day.number }}
+                            {% if day.archive_names|default([]) %}
+                            <span class="ec-year-archive-dot" title="{{ day.archive_names|join(' — Archived; ') }} — Archived" aria-label="Archived events: {{ day.archive_names|join(', ') }}"></span>
+                            {% endif %}
                             {% if day.events > 1 %}<span class="ec-year-day-count" aria-hidden="true">{{ day.events }}</span>{% endif %}
                         </a>
+                        {% elif day.archive_names|default([]) %}
+                        <a class="ec-year-date is-archived{% if day.today %} is-today{% endif %}"
+                           href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=month.number, show_archived=1) }}"
+                           title="{{ day.archive_names|join(' — Archived; ') }} — Archived"
+                           aria-label="{{ day.archive_names|join(', ') }} — Archived. Open Month View.">{{ day.number }}</a>
                         {% elif day.cancelled > 0 %}
                         <span class="ec-year-date is-cancelled{% if day.today %} is-today{% endif %}"
                               title="{{ day.date.strftime('%B %d, %Y') }}: {{ day.cancelled }} cancelled event(s)"
@@ -141,13 +169,20 @@
                     {% endfor %}
                 {% endfor %}
             </div>
+            {% if show_archived and month.archive_names|default([]) %}
+            <div class="ec-year-archive-list" aria-label="Archived events in {{ month.name }}">
+                {% for archived_name in month.archive_names %}
+                <div class="ec-archived-event"><strong>{{ archived_name }}</strong><span>Archived</span></div>
+                {% endfor %}
+            </div>
+            {% endif %}
             <p class="ec-year-month-footer">{{ month.active_dates }} active operating date(s) · {{ month.unit_days }} unit-day(s)</p>
         </section>
         {% endfor %}
     </div>
 
     <p class="ec-year-footnote">
-        Teal dates have scheduled events; outlined amber dates have only cancelled events.
+        Teal dates have scheduled events; outlined amber dates have only cancelled events. Gray dates indicate archived events when Show Archived is selected.
         Select a month or highlighted date to open the existing Month Calendar.
         Counts represent operating dates and assignments, not unique multi-day events.
     </p>

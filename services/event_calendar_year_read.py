@@ -38,6 +38,12 @@ WHERE d.spa_id = %s
   AND d.business_unit_id = %s
   AND d.operating_date >= %s
   AND d.operating_date < %s
+  AND NOT EXISTS (
+       SELECT 1 FROM public.event_calendar_view_metadata AS archive
+       WHERE archive.event_id = e.event_id AND archive.spa_id = e.spa_id
+         AND archive.business_unit_id = e.business_unit_id
+         AND archive.archived_at IS NOT NULL
+   )
 GROUP BY d.operating_date
 ORDER BY d.operating_date
 """

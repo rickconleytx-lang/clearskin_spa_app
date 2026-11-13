@@ -293,6 +293,11 @@ def _lock_current_event_revision(
     cur.execute(
         "SELECT event_revision FROM public.event_calendar_events "
         "WHERE spa_id = %s AND business_unit_id = %s AND event_id = %s "
+        "AND NOT EXISTS (SELECT 1 FROM public.event_calendar_view_metadata AS m "
+        "WHERE m.event_id = event_calendar_events.event_id "
+        "AND m.spa_id = event_calendar_events.spa_id "
+        "AND m.business_unit_id = event_calendar_events.business_unit_id "
+        "AND m.archived_at IS NOT NULL) "
         "FOR UPDATE",
         (spa_id, workspace_id, event_id),
     )

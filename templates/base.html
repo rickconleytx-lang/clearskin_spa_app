@@ -555,6 +555,11 @@
             {% include "partials/calendar_menu.html" %}
         {% endif %}
 
+        {% if (navigation_subscription_tier_code == "pos"
+               and "event_calendar" in subscription_entitlements) %}
+            {% include "partials/peachpos_calendar_menu.html" %}
+        {% endif %}
+
 
         {% if (
             nav_access.can_manage_online_booking

@@ -16,6 +16,18 @@
 .ec-calendar-view-switch a:hover { background: #eee3dc; }
 .ec-calendar-view-switch a.is-active { background: #75545e; color: #fff; }
 .ec-calendar-view-switch a:focus-visible { outline: 3px solid #207c78; outline-offset: 2px; }
+/* Archived overlays contain event name + Archived only. */
+.ec-archived-event { display: block; width: 100%; box-sizing: border-box;
+    border-radius: 7px; padding: 7px 8px; margin: 7px 0;
+    background: #e6e6e6 !important; color: #505050 !important;
+    border: 1px solid #c8c8c8; cursor: default; text-align: left;
+    font-size: .78rem; line-height: 1.4; overflow-wrap: anywhere; }
+.ec-archived-event strong { display: block; }
+.ec-archived-event span { display: block; margin-top: 3px; }
+.ec-show-archived { display: inline-flex; align-items: center;
+    border: 1px solid #aaa; border-radius: 8px; padding: 8px 12px;
+    background: #fff; text-decoration: none; font-weight: 650; color: #555; }
+.ec-show-archived.is-active { background: #e6e6e6; border-color: #888; }
 .ec-week-toolbar { display: flex; align-items: center; justify-content: space-between;
     flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
 .ec-week-toolbar h2 { margin: 0; font-size: 1.4rem; color: #72565e; }
@@ -73,26 +85,30 @@
         </div>
         <div class="ec-week-actions">
             <a class="btn" href="{{ url_for('event_new') }}">Add Event</a>
+            <a class="btn" href="{{ url_for('peachpos_view_events') }}">View Events</a>
             <a class="btn" href="{{ url_for('event_units_home') }}">Manage Event Units</a>
         </div>
     </div>
+    <p><a class="ec-show-archived{% if show_archived %} is-active{% endif %}"
+           href="{{ url_for('peachpos_event_calendar_week', date=calendar.anchor_date.isoformat(), show_archived=0 if show_archived else 1) }}"
+           aria-pressed="{{ 'true' if show_archived else 'false' }}">{{ 'Hide Archived' if show_archived else 'Show Archived' }}</a></p>
     <nav class="ec-calendar-view-switch" aria-label="Event calendar views">
-        <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.year) }}">Year</a>
-        <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=calendar.month) }}">Month</a>
+        <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.year, show_archived=1 if show_archived else None) }}">Year</a>
+        <a href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=calendar.month, show_archived=1 if show_archived else None) }}">Month</a>
         <a class="is-active" aria-current="page"
-           href="{{ url_for('peachpos_event_calendar_week', date=calendar.anchor_date.isoformat()) }}">Week</a>
+           href="{{ url_for('peachpos_event_calendar_week', date=calendar.anchor_date.isoformat(), show_archived=1 if show_archived else None) }}">Week</a>
     </nav>
     <div class="ec-week-toolbar">
         <h2>{{ calendar.label }}</h2>
         <nav class="ec-week-navigation" aria-label="Calendar weeks">
             {% if calendar.previous_date is not none %}
-                <a href="{{ url_for('peachpos_event_calendar_week', date=calendar.previous_date.isoformat()) }}">Previous Week</a>
+                <a href="{{ url_for('peachpos_event_calendar_week', date=calendar.previous_date.isoformat(), show_archived=1 if show_archived else None) }}">Previous Week</a>
             {% else %}
                 <span class="is-disabled" aria-disabled="true">Previous Week</span>
             {% endif %}
-            <a href="{{ url_for('peachpos_event_calendar_week') }}">This Week</a>
+            <a href="{{ url_for('peachpos_event_calendar_week', show_archived=1 if show_archived else None) }}">This Week</a>
             {% if calendar.next_date is not none %}
-                <a href="{{ url_for('peachpos_event_calendar_week', date=calendar.next_date.isoformat()) }}">Next Week</a>
+                <a href="{{ url_for('peachpos_event_calendar_week', date=calendar.next_date.isoformat(), show_archived=1 if show_archived else None) }}">Next Week</a>
             {% else %}
                 <span class="is-disabled" aria-disabled="true">Next Week</span>
             {% endif %}
@@ -118,6 +134,11 @@
                         {{ day.assignment_count }} truck/unit assignment(s)
                     </p>
                     {% for item in day.entries %}
+                        {% if item.is_archived|default(false) %}
+                        <div class="ec-archived-event" title="{{ item.name }} — Archived">
+                            <strong>{{ item.name }}</strong><span>Archived</span>
+                        </div>
+                        {% else %}
                         <button type="button"
                                 class="ec-week-event{% if item.is_cancelled %} is-cancelled{% endif %}"
                                 data-details-url="{{ url_for('peachpos_event_calendar_details', event_id=item.event_id) }}"
@@ -136,6 +157,7 @@
                                 <span class="ec-week-event-status">Cancelled</span>
                             {% endif %}
                         </button>
+                        {% endif %}
                     {% else %}
                         <p class="ec-week-empty">No scheduled events</p>
                     {% endfor %}

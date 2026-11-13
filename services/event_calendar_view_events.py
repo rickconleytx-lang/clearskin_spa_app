@@ -85,6 +85,74 @@ def upsert_next_occurrence(cur, *, spa_id, workspace_id, event_id, reference):
     return reference
 
 
+class ViewEventsArchiveConflict(ViewEventsError):
+    """Requested list archive state changed, or event is outside scope."""
+
+
+def set_event_view_archived(cur, *, spa_id, workspace_id, event_id,
+                            actor_id, archive):
+    """Change only View Events list metadata in caller's transaction.
+
+    Does not change event status, event/calendar allocations, publication,
+    employee shifts, Next Occurrence, or Business Schedule. Server must
+    derive scope/actor from the current authenticated session.
+    """
+    if any(type(v) is not int or v <= 0 for v in
+           (spa_id, workspace_id, event_id, actor_id)):
+        raise ViewEventsError("Invalid View Events archive scope.")
+    if type(archive) is not bool:
+        raise ViewEventsError("Invalid archive action.")
+
+    if archive:
+        cur.execute(
+            """
+            INSERT INTO public.event_calendar_view_metadata
+              (event_id, spa_id, business_unit_id, archived_at,
+               archived_by_user_id)
+            SELECT e.event_id, e.spa_id, e.business_unit_id,
+                   NOW(), %s
+            FROM public.event_calendar_events AS e
+            WHERE e.spa_id = %s AND e.business_unit_id = %s
+              AND e.event_id = %s
+            ON CONFLICT (event_id) DO UPDATE SET
+              archived_at = NOW(),
+              archived_by_user_id = EXCLUDED.archived_by_user_id,
+              updated_at = NOW()
+            WHERE event_calendar_view_metadata.spa_id = EXCLUDED.spa_id
+              AND event_calendar_view_metadata.business_unit_id =
+                  EXCLUDED.business_unit_id
+              AND event_calendar_view_metadata.archived_at IS NULL
+            RETURNING event_id
+            """,
+            (actor_id, spa_id, workspace_id, event_id),
+        )
+    else:
+        cur.execute(
+            """
+            UPDATE public.event_calendar_view_metadata AS m
+               SET archived_at = NULL,
+                   archived_by_user_id = NULL,
+                   updated_at = NOW()
+             WHERE m.spa_id = %s AND m.business_unit_id = %s
+               AND m.event_id = %s AND m.archived_at IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM public.event_calendar_events AS e
+                   WHERE e.event_id = m.event_id
+                     AND e.spa_id = m.spa_id
+                     AND e.business_unit_id = m.business_unit_id
+               )
+            RETURNING m.event_id
+            """,
+            (spa_id, workspace_id, event_id),
+        )
+    result = cur.fetchone()
+    if result is None or int(result[0]) != event_id:
+        raise ViewEventsArchiveConflict(
+            "This event's archive state changed or it is unavailable."
+        )
+    return archive
+
+
 def _validated_date(value, field):
     if value is None:
         return None

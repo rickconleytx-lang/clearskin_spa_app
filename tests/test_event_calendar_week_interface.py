@@ -50,6 +50,7 @@ def url_for(endpoint, **kw):
         "peachpos_event_calendar_details": "/events/21/details",
         "event_new": "/events/new",
         "event_units_home": "/events/units",
+        "peachpos_view_events": "/events/view",
     }
     return paths[endpoint] + ("?" + urlencode(kw) if kw else "")
 

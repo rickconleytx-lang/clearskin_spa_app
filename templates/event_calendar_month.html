@@ -53,6 +53,18 @@
     outline-offset: 2px;
 }
 
+/* Archived overlays contain event name + Archived only. */
+.ec-archived-event { display: block; width: 100%; box-sizing: border-box;
+    border-radius: 7px; padding: 7px 8px; margin: 7px 0;
+    background: #e6e6e6 !important; color: #505050 !important;
+    border: 1px solid #c8c8c8; cursor: default; text-align: left;
+    font-size: .78rem; line-height: 1.4; overflow-wrap: anywhere; }
+.ec-archived-event strong { display: block; }
+.ec-archived-event span { display: block; margin-top: 3px; }
+.ec-show-archived { display: inline-flex; align-items: center;
+    border: 1px solid #aaa; border-radius: 8px; padding: 8px 12px;
+    background: #fff; text-decoration: none; font-weight: 650; color: #555; }
+.ec-show-archived.is-active { background: #e6e6e6; border-color: #888; }
 .ec-month-toolbar {
     display: flex;
     align-items: center;
@@ -272,17 +284,21 @@
             <a class="btn" href="{{ url_for('event_new') }}">
                 Add Event
             </a>
+            <a class="btn" href="{{ url_for('peachpos_view_events') }}">View Events</a>
             <a class="btn" href="{{ url_for('event_units_home') }}">
                 Manage Event Units
             </a>
         </div>
     </div>
 
+    <p><a class="ec-show-archived{% if show_archived %} is-active{% endif %}"
+           href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=calendar.month, show_archived=0 if show_archived else 1) }}"
+           aria-pressed="{{ 'true' if show_archived else 'false' }}">{{ 'Hide Archived' if show_archived else 'Show Archived' }}</a></p>
     <nav class="ec-calendar-view-switch" aria-label="Event calendar views">
-        <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.year) }}">Year</a>
+        <a href="{{ url_for('peachpos_event_calendar_year', year=calendar.year, show_archived=1 if show_archived else None) }}">Year</a>
         <a class="is-active" aria-current="page"
-           href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=calendar.month) }}">Month</a>
-        <a href="{{ url_for('peachpos_event_calendar_week', year=calendar.year, month=calendar.month) }}">Week</a>
+           href="{{ url_for('peachpos_event_calendar_month', year=calendar.year, month=calendar.month, show_archived=1 if show_archived else None) }}">Month</a>
+        <a href="{{ url_for('peachpos_event_calendar_week', year=calendar.year, month=calendar.month, show_archived=1 if show_archived else None) }}">Week</a>
     </nav>
 
     <div class="ec-month-toolbar">
@@ -290,15 +306,15 @@
         <nav class="ec-month-navigation" aria-label="Calendar months">
             <a href="{{ url_for('peachpos_event_calendar_month',
                  year=calendar.previous_year,
-                 month=calendar.previous_month) }}">
+                 month=calendar.previous_month, show_archived=1 if show_archived else None) }}">
                 Previous
             </a>
-            <a href="{{ url_for('peachpos_event_calendar_month') }}">
+            <a href="{{ url_for('peachpos_event_calendar_month', show_archived=1 if show_archived else None) }}">
                 This Month
             </a>
             <a href="{{ url_for('peachpos_event_calendar_month',
                  year=calendar.next_year,
-                 month=calendar.next_month) }}">
+                 month=calendar.next_month, show_archived=1 if show_archived else None) }}">
                 Next
             </a>
         </nav>
@@ -326,6 +342,11 @@
                         </a>
 
                         {% for item in day.entries %}
+                            {% if item.is_archived|default(false) %}
+                            <div class="ec-archived-event" title="{{ item.name }} — Archived">
+                                <strong>{{ item.name }}</strong><span>Archived</span>
+                            </div>
+                            {% else %}
                             <button type="button" class="ec-month-event"
                                  data-details-url="{{ url_for('peachpos_event_calendar_details', event_id=item.event_id) }}"
                                  style="background-color: {{ item.color }};
@@ -346,6 +367,7 @@
                                     </span>
                                 {% endif %}
                             </button>
+                            {% endif %}
                         {% endfor %}
                     </div>
                 {% endfor %}

@@ -24,6 +24,7 @@ def url_for(endpoint, **kw):
         'peachpos_event_calendar_month': '/events/calendar',
         'event_new': '/events/new',
         'event_units_home': '/events/units',
+        'peachpos_view_events': '/events/view',
     }
     path = paths[endpoint]
     return path + ('?' + urlencode(kw) if kw else '')
@@ -93,7 +94,7 @@ class YearRouteContract(unittest.TestCase):
 
 class YearMonthInterfaceContract(unittest.TestCase):
     def test_existing_month_has_year_switch_and_active_month(self):
-        self.assertIn("url_for('peachpos_event_calendar_year', year=calendar.year)", MONTH)
+        self.assertIn("url_for('peachpos_event_calendar_year', year=calendar.year, show_archived=1 if show_archived else None)", MONTH)
         self.assertIn('aria-label="Event calendar views"', MONTH)
         self.assertIn('aria-current="page"', MONTH)
         self.assertIn('>Month</a>', MONTH)

@@ -66,6 +66,12 @@ WHERE e.spa_id = %s
   AND e.business_unit_id = %s
   AND e.start_date <= %s
   AND e.end_date >= %s
+  AND NOT EXISTS (
+      SELECT 1 FROM public.event_calendar_view_metadata AS archive
+      WHERE archive.event_id = e.event_id AND archive.spa_id = e.spa_id
+        AND archive.business_unit_id = e.business_unit_id
+        AND archive.archived_at IS NOT NULL
+  )
 ORDER BY
     e.start_date,
     e.event_id,

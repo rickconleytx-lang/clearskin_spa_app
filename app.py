@@ -130211,10 +130211,81 @@ def peachpos_view_events():
         status=status,
         search=search,
         archive_mode=archive_mode,
+        event_csrf_token=_security_form_csrf_token(),
     ))
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+def _ec_set_view_events_archive_state(event_id, *, archive):
+    """Archive/restore metadata, allocations and public flag atomically."""
+    from services.event_calendar_view_events import (
+        ViewEventsError, ViewEventsArchiveConflict,
+    )
+    from services.event_calendar_archive_actions import apply_event_archive_state
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+    if event_id <= 0:
+        abort(404)
+    if request.content_length is not None and request.content_length > 4096:
+        abort(413)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if archive and request.form.get("archive_acknowledged") != "1":
+        abort(400)
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+    conn = get_db_connection()
+    try:
+        try:
+            with conn.cursor() as cur:
+                apply_event_archive_state(
+                    cur, spa_id=spa_id, workspace_id=workspace_id,
+                    event_id=event_id, actor_id=actor_id, archive=archive,
+                )
+            conn.commit()
+        except ViewEventsArchiveConflict:
+            conn.rollback()
+            abort(409)
+        except ViewEventsError:
+            conn.rollback()
+            abort(400)
+        except Exception:
+            conn.rollback()
+            raise
+    finally:
+        conn.close()
+
+    if archive:
+        flash("Event archived. Event-specific equipment/employee assignments removed; "
+              "PeachWeb unchecked. The event record is preserved.", "success")
+    else:
+        flash("Event restored. Reassign equipment and employees and explicitly "
+              "enable PeachWeb if desired.", "success")
+    return redirect(url_for("peachpos_view_events"))
+
+
+@app.route("/events/<int:event_id>/archive", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_archive(event_id):
+    return _ec_set_view_events_archive_state(event_id, archive=True)
+
+
+@app.route("/events/<int:event_id>/restore", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_restore(event_id):
+    return _ec_set_view_events_archive_state(event_id, archive=False)
 
 
 @app.route("/events/calendar", methods=["GET"])
@@ -130230,9 +130301,17 @@ def peachpos_event_calendar_month():
         list_event_calendar_rows,
     )
     from services.event_calendar_month import build_month_view
+    from services.event_calendar_archive_read import (
+        list_archived_event_spans, overlay_archived_month,
+    )
 
     if current_business_unit_membership_role_code() != "organization_admin":
         abort(403)
+
+    show_archived_raw = request.args.get("show_archived", "0")
+    if show_archived_raw not in ("0", "1"):
+        abort(400)
+    show_archived = show_archived_raw == "1"
 
     today = date.today()
 
@@ -130268,6 +130347,11 @@ def peachpos_event_calendar_month():
         calendar_data = build_month_view(
             rows, year, month, today
         )
+        if show_archived:
+            archived_spans = list_archived_event_spans(
+                conn, spa_id, workspace_id, window_start, window_end,
+            )
+            overlay_archived_month(calendar_data, archived_spans)
 
     finally:
         try:
@@ -130278,6 +130362,7 @@ def peachpos_event_calendar_month():
     return render_template(
         "event_calendar_month.html",
         calendar=calendar_data,
+        show_archived=show_archived,
         event_csrf_token=_security_form_csrf_token(),
     )
 
@@ -130299,9 +130384,17 @@ def peachpos_event_calendar_week():
     from flask import abort, make_response, render_template, request
     from services.event_calendar_read import list_event_calendar_rows
     from services.event_calendar_week import build_week_view, week_bounds
+    from services.event_calendar_archive_read import (
+        list_archived_event_spans, overlay_archived_week,
+    )
 
     if current_business_unit_membership_role_code() != "organization_admin":
         abort(403)
+
+    show_archived_raw = request.args.get("show_archived", "0")
+    if show_archived_raw not in ("0", "1"):
+        abort(400)
+    show_archived = show_archived_raw == "1"
 
     today = date.today()
     args = request.args
@@ -130343,6 +130436,11 @@ def peachpos_event_calendar_week():
             conn, spa_id, workspace_id, week_start, week_end
         )
         calendar_data = build_week_view(rows, anchor, today)
+        if show_archived:
+            archived_spans = list_archived_event_spans(
+                conn, spa_id, workspace_id, week_start, week_end,
+            )
+            overlay_archived_week(calendar_data, archived_spans)
     finally:
         try:
             conn.rollback()
@@ -130352,6 +130450,7 @@ def peachpos_event_calendar_week():
     response = make_response(render_template(
         "event_calendar_week.html",
         calendar=calendar_data,
+        show_archived=show_archived,
         event_csrf_token=_security_form_csrf_token(),
     ))
     response.headers["Cache-Control"] = "private, no-store"
@@ -130370,9 +130469,17 @@ def peachpos_event_calendar_year():
     from flask import make_response, render_template, request
     from services.event_calendar_year_read import list_year_day_summaries
     from services.event_calendar_year import build_year_view
+    from services.event_calendar_archive_read import (
+        list_archived_event_spans, overlay_archived_year,
+    )
 
     if current_business_unit_membership_role_code() != "organization_admin":
         abort(403)
+
+    show_archived_raw = request.args.get("show_archived", "0")
+    if show_archived_raw not in ("0", "1"):
+        abort(400)
+    show_archived = show_archived_raw == "1"
 
     today = date.today()
     try:
@@ -130391,6 +130498,11 @@ def peachpos_event_calendar_year():
             conn, spa_id, workspace_id, year
         )
         calendar_data = build_year_view(summaries, year, today)
+        if show_archived:
+            archived_spans = list_archived_event_spans(
+                conn, spa_id, workspace_id, date(year, 1, 1), date(year, 12, 31),
+            )
+            overlay_archived_year(calendar_data, archived_spans)
     finally:
         try:
             conn.rollback()
@@ -130400,6 +130512,7 @@ def peachpos_event_calendar_year():
     response = make_response(render_template(
         "event_calendar_year.html",
         calendar=calendar_data,
+        show_archived=show_archived,
         current_month=today.month if year == today.year else 1,
     ))
     response.headers["Cache-Control"] = "private, no-store"

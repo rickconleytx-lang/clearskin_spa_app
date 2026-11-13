@@ -1,0 +1,69 @@
+<div class="user-menu app-menu-category">
+
+    <button type="button"
+            class="user-menu-button app-menu-category-button"
+            onclick="toggleCalendarMenu()">
+
+        <span class="app-menu-category-main">
+            <span class="app-menu-category-icon" aria-hidden="true">📅</span>
+            <span class="app-menu-category-label">Calendar &amp; Events</span>
+        </span>
+        <span class="app-menu-category-chevron" aria-hidden="true">›</span>
+    </button>
+
+    <div id="calendarMenuDropdown"
+         class="user-menu-dropdown app-menu-submenu"
+         style="display:none;">
+
+        <div class="app-menu-submenu-section">
+            <div class="app-nested-menu">
+                <button type="button"
+                        class="app-nested-menu-button"
+                        data-nested-menu-target="calendarViewsNestedMenu"
+                        aria-controls="calendarViewsNestedMenu"
+                        aria-expanded="false"
+                        aria-haspopup="true"
+                        onclick="toggleNestedAppMenu('calendarViewsNestedMenu', this)">
+                    <span class="app-nested-menu-button-main">
+                        <span aria-hidden="true">📅</span>
+                        <span>Calendar</span>
+                    </span>
+                    <span class="app-nested-menu-chevron" aria-hidden="true">›</span>
+                </button>
+
+                <div id="calendarViewsNestedMenu"
+                     class="app-nested-menu-pane"
+                     style="display:none;">
+                    <div class="app-nested-menu-header">
+                        <div class="app-nested-menu-title">Calendar Views</div>
+                        <button type="button"
+                                class="app-nested-menu-close"
+                                aria-label="Close Calendar Views"
+                                onclick="closeNestedAppMenuById('calendarViewsNestedMenu')">✕</button>
+                    </div>
+                    <a href="{{ url_for('peachpos_event_calendar_week') }}">
+                        <span aria-hidden="true">📅</span><span>Week View</span>
+                    </a>
+                    <a href="{{ url_for('peachpos_event_calendar_month') }}">
+                        <span aria-hidden="true">🗓️</span><span>Month View</span>
+                    </a>
+                    <a href="{{ url_for('peachpos_event_calendar_year') }}">
+                        <span aria-hidden="true">📆</span><span>Year View</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="user-menu-divider"></div>
+
+        <div class="app-menu-submenu-section">
+            <div class="app-menu-submenu-heading">Events</div>
+            <a href="{{ url_for('event_new') }}">
+                <span aria-hidden="true">➕</span><span>Add Event</span>
+            </a>
+            <a href="{{ url_for('peachpos_view_events') }}">
+                <span aria-hidden="true">📋</span><span>View Events</span>
+            </a>
+        </div>
+    </div>
+</div>
