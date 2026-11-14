@@ -157,6 +157,9 @@
                         <div class="ec-view-actions">
                             <a class="ec-view-action" href="{{ url_for('peachpos_event_calendar_month', year=event.start_date.year, month=event.start_date.month) }}">Go To Month</a>
                             <a class="ec-view-action" href="{{ url_for('event_new', edit=event.event_id) }}">Edit</a>
+                            {% if not event.is_archived %}
+                                <a class="ec-view-action" href="{{ url_for('event_new', copy=event.event_id) }}">Copy</a>
+                            {% endif %}
                             {% if event.is_archived %}
                             <form class="ec-view-action-form" method="POST" action="{{ url_for('peachpos_event_restore', event_id=event.event_id) }}">
                                 <input type="hidden" name="security_csrf_token" value="{{ event_csrf_token }}">
