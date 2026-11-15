@@ -490,6 +490,81 @@
             font-size: 1.05rem;
         }
 
+        /* PEACHWEB_EVENTS_PUBLIC_STYLES_START */
+        .peachweb-locations-section {
+            background: var(--white);
+            padding-top: 68px;
+            padding-bottom: 76px;
+        }
+
+        .peachweb-locations-heading {
+            margin-bottom: 34px;
+        }
+
+        .peachweb-locations-week {
+            padding: 19px 0;
+            border-top: 1px solid var(--border);
+        }
+
+        .peachweb-locations-week:last-child {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .peachweb-locations-week-title {
+            margin: 0 0 13px;
+            font-size: 1.04rem;
+            font-weight: 700;
+        }
+
+        .peachweb-locations-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .peachweb-locations-entry {
+            display: grid;
+            grid-template-columns:
+                minmax(0, 1.3fr)
+                minmax(0, 0.75fr)
+                minmax(0, 1.6fr);
+            gap: 8px 18px;
+            align-items: baseline;
+            padding: 8px 0;
+        }
+
+        .peachweb-locations-name {
+            font-weight: 650;
+        }
+
+        .peachweb-locations-name a {
+            color: var(--peach-dark);
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+
+        .peachweb-locations-city {
+            color: var(--muted);
+        }
+
+        .peachweb-locations-hours {
+            color: var(--text);
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 720px) {
+            .peachweb-locations-entry {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 3px;
+                padding: 11px 0;
+            }
+
+            .peachweb-locations-week-title {
+                margin-bottom: 8px;
+            }
+        }
+        /* PEACHWEB_EVENTS_PUBLIC_STYLES_END */
+
         .about-section {
             background: var(--cream);
         }
@@ -1156,6 +1231,61 @@
 
         {% endif %}
 
+
+        {# PEACHWEB_EVENTS_PUBLIC_START #}
+        {% if is_peachpos and public_events_section and public_events_section.weeks %}
+            <section
+                id="where-to-find-us"
+                class="section peachweb-locations-section"
+            >
+                <div class="section-inner">
+                    <div class="section-heading peachweb-locations-heading">
+                        <h2>{{ public_events_section.heading }}</h2>
+
+                        {% if public_events_section.intro %}
+                            <p>{{ public_events_section.intro }}</p>
+                        {% endif %}
+                    </div>
+
+                    {% for week in public_events_section.weeks %}
+                        <div class="peachweb-locations-week">
+                            <h3 class="peachweb-locations-week-title">
+                                {{ week.heading }}
+                            </h3>
+
+                            <ul class="peachweb-locations-list">
+                                {% for event in week.events %}
+                                    <li class="peachweb-locations-entry">
+                                        <span class="peachweb-locations-name">
+                                            {% if event.directions_url %}
+                                                <a
+                                                    href="{{ event.directions_url }}"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                >{{ event.name }}</a>
+                                            {% else %}
+                                                {{ event.name }}
+                                            {% endif %}
+                                        </span>
+
+                                        <span class="peachweb-locations-city">
+                                            {{ event.city }}
+                                        </span>
+
+                                        {% if event.hours %}
+                                            <span class="peachweb-locations-hours">
+                                                {{ event.hours }}
+                                            </span>
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endfor %}
+                </div>
+            </section>
+        {% endif %}
+        {# PEACHWEB_EVENTS_PUBLIC_END #}
 
         {% if website_settings.show_about_section %}
 

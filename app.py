@@ -204,6 +204,11 @@ from services.provisioning_service import (
     provision_new_business_for_owner_invitation,
 )
 from services.provisioning_service import resolve_peachpos_website_defaults
+from services.peachweb_events_settings import (
+    load_event_settings,
+    parse_event_settings_form,
+    save_event_settings,
+)
 
 
 # --------------------------------------------------
@@ -5608,6 +5613,30 @@ def _render_public_tenant_home(tenant):
             )
         )
 
+    public_events_section = None
+
+    if tenant["tier_code"] == "pos":
+        from services.peachweb_public_section import (
+            load_public_events_section,
+        )
+
+        events_conn = get_db_connection()
+
+        try:
+            events_conn.set_session(readonly=True)
+            events_cursor = events_conn.cursor()
+
+            try:
+                public_events_section = load_public_events_section(
+                    events_cursor,
+                    tenant=tenant,
+                )
+            finally:
+                events_cursor.close()
+        finally:
+            events_conn.rollback()
+            events_conn.close()
+
     return render_template(
         "public_site/tenant_home.html",
 
@@ -5654,6 +5683,7 @@ def _render_public_tenant_home(tenant):
                 "additional_menu_items"
             ],
 
+        public_events_section=public_events_section,
         website_links=
             content["website_links"],
     )
@@ -46850,6 +46880,14 @@ def public_website_settings():
     if not business_unit_id:
         abort(403)
 
+    if request.method == "POST" and not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(403)
+
+    from flask import g
+    g.peachweb_settings_csrf_token = _security_form_csrf_token()
+
     is_peachpos = (
         current_subscription_tier_code() == "pos"
     )
@@ -47290,6 +47328,24 @@ def public_website_settings():
                         )
 
                     settings.update(preserved)
+
+                    # Preserve previously saved Events settings
+                    # when an older form omits the new controls.
+                    if "events_locations_heading" in request.form:
+                        try:
+                            event_settings = parse_event_settings_form(
+                                request.form
+                            )
+                        except ValueError as exc:
+                            abort(400, description=str(exc))
+                    else:
+                        event_settings = load_event_settings(
+                            cur,
+                            spa_id=spa_id,
+                            business_unit_id=business_unit_id,
+                        )
+
+                    settings.update(event_settings)
 
                 allowed_color_schemes = {
                     "peach_cream",
@@ -47985,6 +48041,13 @@ def public_website_settings():
                         "Website display style was not saved"
                     )
 
+                save_event_settings(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    settings=event_settings,
+                )
+
             cur.execute(
                 '''
                 UPDATE public_website_settings
@@ -48119,6 +48182,14 @@ def public_website_settings():
             style_row = cur.fetchone()
             settings["website_display_style"] = (
                 style_row[0] if style_row else "general"
+            )
+
+            settings.update(
+                load_event_settings(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                )
             )
 
         cur.execute(

@@ -6,11 +6,13 @@ from services.event_calendar_view_events import (
     COLUMNS, ViewEventsError, list_view_events, validate_next_date_reference,
 )
 
-def sample_row(*, archived_at=None, next_date_reference="Oct 5-8"):
+def sample_row(*, archived_at=None, next_date_reference="Oct 5-8",
+               is_public=True, assigned_unit_types="Truck"):
     return (21, "Keller Fall Festival", date(2026, 12, 4),
             date(2026, 12, 6), "Keller", "TX", "Keller Park",
             "Sample Coordinator", "555-0000", "sample@example.invalid",
-            "scheduled", next_date_reference, archived_at)
+            "scheduled", next_date_reference, archived_at,
+                is_public, assigned_unit_types)
 
 class FakeCursor:
     def __init__(self, rows):
@@ -38,6 +40,8 @@ class ViewEventsTests(unittest.TestCase):
         self.assertEqual(found["events"][0]["event_id"], 21)
         self.assertEqual(found["events"][0]["next_date_display"], "Oct 5-8")
         self.assertFalse(found["events"][0]["is_archived"])
+        self.assertTrue(found["events"][0]["is_public"])
+        self.assertEqual(found["events"][0]["assigned_unit_types"], "Truck")
     def test_missing_metadata_displays_not_scheduled(self):
         found = list_view_events(FakeConn([sample_row(next_date_reference="")]),44,41)
         self.assertEqual(found["events"][0]["next_date_display"], "Not Scheduled")
@@ -141,8 +145,50 @@ class ViewEventsTests(unittest.TestCase):
     def test_reference_does_not_schedule_anything(self):
         conn=FakeConn([sample_row()]);list_view_events(conn,44,41)
         sql=conn.cursor_obj.calls[0][0].upper()
-        for term in ("EVENT_CALENDAR_UNIT_ASSIGNMENTS", "BUSINESS_SCHEDULE", "REMINDER_QUEUE"):
+        for term in ("BUSINESS_SCHEDULE", "REMINDER_QUEUE", "UPDATE ", "INSERT ", "DELETE "):
             self.assertNotIn(term,sql)
+
+    def test_unit_type_lookup_is_workspace_scoped(self):
+        conn = FakeConn([sample_row(assigned_unit_types="Trailer · Truck")])
+        result = list_view_events(conn, 44, 41)
+        sql, params = conn.cursor_obj.calls[0]
+        self.assertEqual(
+            result["events"][0]["assigned_unit_types"], "Trailer · Truck"
+        )
+        self.assertIn("a.event_id = e.event_id", sql)
+        self.assertIn("a.spa_id = e.spa_id", sql)
+        self.assertIn("a.business_unit_id = e.business_unit_id", sql)
+        self.assertIn("u.spa_id = a.spa_id", sql)
+        self.assertIn("u.business_unit_id = a.business_unit_id", sql)
+        self.assertIn("a.is_active = TRUE", sql)
+        self.assertEqual(params[:2], (44, 41))
+        for forbidden in ("UPDATE ", "INSERT ", "DELETE "):
+            self.assertNotIn(forbidden, sql.upper())
+
+    def test_archived_event_without_units_or_publication(self):
+        now = datetime.now(timezone.utc)
+        row = sample_row(
+            archived_at=now,
+            is_public=False,
+            assigned_unit_types="",
+        )
+        event = list_view_events(
+            FakeConn([row]), 44, 41, archive_mode="archived"
+        )["events"][0]
+        self.assertTrue(event["is_archived"])
+        self.assertFalse(event["is_public"])
+        self.assertEqual(event["assigned_unit_types"], "")
+
+    def test_view_events_new_columns_and_empty_state(self):
+        page = (
+            Path(__file__).resolve().parents[1]
+            / "templates/event_view_events.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn('<th scope="col">Display on Web</th>', page)
+        self.assertIn('event.assigned_unit_types or "—"', page)
+        self.assertIn('"Yes" if event.is_public else "No"', page)
+        self.assertIn('colspan="7" class="ec-view-empty"', page)
+
 
 if __name__ == "__main__":
     unittest.main()

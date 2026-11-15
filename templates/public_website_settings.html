@@ -325,6 +325,11 @@
     <div class="website-settings-card">
 
         <form method="POST">
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ g.peachweb_settings_csrf_token }}"
+            >
 
             <section class="website-settings-section">
                 <h2>Website Identity</h2>
@@ -918,6 +923,92 @@
 
             </section>
 
+
+            {# PEACHWEB_EVENTS_SETTINGS_START #}
+            {% if navigation_subscription_tier_code == "pos" %}
+            <section class="website-settings-section">
+
+                <h2>Events &amp; Locations</h2>
+
+                <p class="website-settings-help">
+                    Show customers where to find your business
+                    during the next five Monday–Sunday weeks.
+                    Only events marked Include on PeachWeb
+                    are eligible to appear.
+                </p>
+
+                <div class="website-settings-field website-settings-checkbox">
+                    <input
+                        type="checkbox"
+                        id="show_events_locations"
+                        name="show_events_locations"
+                        {% if settings.show_events_locations %}checked{% endif %}
+                    >
+                    <label for="show_events_locations">
+                        Show Events &amp; Locations on PeachWeb
+                    </label>
+                </div>
+
+                <div class="website-settings-field">
+                    <label for="events_locations_heading">
+                        Section Heading
+                    </label>
+                    <input
+                        type="text"
+                        id="events_locations_heading"
+                        name="events_locations_heading"
+                        maxlength="180"
+                        required
+                        value="{{ settings.events_locations_heading|default('Where to Find Us')|e }}"
+                    >
+                    <span class="website-settings-help">
+                        The heading displayed above your weekly locations.
+                    </span>
+                </div>
+
+                <div class="website-settings-field">
+                    <label for="events_locations_intro">
+                        Introduction (Optional)
+                    </label>
+                    <textarea
+                        id="events_locations_intro"
+                        name="events_locations_intro"
+                        maxlength="1000"
+                    >{{ settings.events_locations_intro|default('Find our food trucks at these upcoming events and locations!')|e }}</textarea>
+                </div>
+
+                <div class="website-settings-field website-settings-checkbox">
+                    <input
+                        type="checkbox"
+                        id="events_locations_show_directions"
+                        name="events_locations_show_directions"
+                        {% if settings.events_locations_show_directions %}checked{% endif %}
+                    >
+                    <label for="events_locations_show_directions">
+                        Show Directions Links
+                    </label>
+                </div>
+
+                <div class="website-settings-field website-settings-checkbox">
+                    <input
+                        type="checkbox"
+                        id="events_locations_show_daily_hours"
+                        name="events_locations_show_daily_hours"
+                        {% if settings.events_locations_show_daily_hours %}checked{% endif %}
+                    >
+                    <label for="events_locations_show_daily_hours">
+                        Show Daily Operating Hours
+                    </label>
+                </div>
+
+                <span class="website-settings-help">
+                    The schedule advances automatically every Monday
+                    at midnight in your business's local time zone.
+                </span>
+
+            </section>
+            {% endif %}
+            {# PEACHWEB_EVENTS_SETTINGS_END #}
 
             <section class="website-settings-section">
 

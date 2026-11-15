@@ -27,6 +27,13 @@ PUBLIC_WEBSITE_DEFAULTS = {
     "show_promotional_section": False,
     "promotional_heading": "",
     "promotional_text": "",
+    "show_events_locations": False,
+    "events_locations_heading": "Where to Find Us",
+    "events_locations_intro": (
+        "Find our food trucks at these upcoming events and locations!"
+    ),
+    "events_locations_show_directions": True,
+    "events_locations_show_daily_hours": True,
     "show_about_section": True,
     "about_heading": "About Our Business",
     "about_description": (

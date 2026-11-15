@@ -38,6 +38,8 @@ def render_page(*, event_name="Keller Fall Festival", next_date="Oct 5-8",
         "state": "TX",
         "contact_name": "Festival Coordinator",
         "next_date_display": next_date,
+        "assigned_unit_types": "" if archived else "Truck",
+        "is_public": not archived,
         "is_archived": archived,
     }]
     return template.render(

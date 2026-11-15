@@ -16,6 +16,7 @@ COLUMNS = (
     "event_id", "event_name", "start_date", "end_date", "city",
     "state", "venue_name", "contact_name", "contact_phone",
     "contact_email", "event_status", "next_date_reference", "archived_at",
+    "is_public", "assigned_unit_types",
 )
 
 STATUSES = frozenset({"scheduled", "confirmed", "cancelled", "completed"})
@@ -27,7 +28,23 @@ SELECT
     e.city, e.state, e.venue_name,
     e.contact_name, e.contact_phone, e.contact_email, e.event_status,
     COALESCE(m.next_date_reference, '') AS next_date_reference,
-    m.archived_at
+    m.archived_at,
+    e.is_public,
+    COALESCE((
+        SELECT STRING_AGG(
+            DISTINCT INITCAP(u.unit_type),
+            ' · ' ORDER BY INITCAP(u.unit_type)
+        )
+        FROM event_calendar_unit_assignments a
+        JOIN event_units u
+          ON u.event_unit_id = a.event_unit_id
+         AND u.spa_id = a.spa_id
+         AND u.business_unit_id = a.business_unit_id
+        WHERE a.event_id = e.event_id
+          AND a.spa_id = e.spa_id
+          AND a.business_unit_id = e.business_unit_id
+          AND a.is_active = TRUE
+    ), '') AS assigned_unit_types
 FROM event_calendar_events e
 LEFT JOIN event_calendar_view_metadata m
   ON m.event_id = e.event_id

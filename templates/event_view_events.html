@@ -133,6 +133,7 @@
                     <th scope="col">City</th>
                     <th scope="col">Contact Name</th>
                     <th scope="col">Next Occurrence</th>
+                    <th scope="col">Display on Web</th>
                     <th scope="col">Actions</th>
                 </tr>
             </thead>
@@ -147,12 +148,13 @@
                     </td>
                     <td>
                         <span class="ec-view-main">{{ event.event_name }}</span>
-                        {% if event.venue_name %}<span class="ec-view-secondary">{{ event.venue_name }}</span>{% endif %}
+                        <span class="ec-view-secondary">{{ event.assigned_unit_types or "—" }}</span>
                         {% if event.is_archived %}<span class="ec-view-archive-label">Archived reference</span>{% endif %}
                     </td>
                     <td>{{ event.city or '—' }}{% if event.state %}, {{ event.state }}{% endif %}</td>
                     <td>{{ event.contact_name or '—' }}</td>
                     <td>{{ event.next_date_display }}</td>
+                    <td>{{ "Yes" if event.is_public else "No" }}</td>
                     <td>
                         <div class="ec-view-actions">
                             <a class="ec-view-action" href="{{ url_for('peachpos_event_calendar_month', year=event.start_date.year, month=event.start_date.month) }}">Go To Month</a>
@@ -176,7 +178,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="ec-view-empty">No events match these filters.</td></tr>
+                <tr><td colspan="7" class="ec-view-empty">No events match these filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
