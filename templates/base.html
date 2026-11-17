@@ -2346,8 +2346,25 @@ document.addEventListener(
                 </strong>
             </div>
 
+
             <div class="about-peach-detail-row">
-                <span>Subscription Level</span>
+                <span>Subscription Type</span>
+                <strong>
+                    {{
+                        {
+                            "solo": "PeachSolo",
+                            "pos": "PeachPOS",
+                            "team": "PeachTeam"
+                        }.get(
+                            navigation_subscription_tier_code,
+                            "Not Available"
+                        )
+                    }}
+                </strong>
+            </div>
+
+            <div class="about-peach-detail-row">
+                <span>Subscription Status</span>
 
                 <strong>
                     {{
@@ -2375,6 +2392,19 @@ document.addEventListener(
                 Your business operations coach, helping you monitor
                 appointments, finances, communication, compliance,
                 and important business activity.
+            </p>
+
+            <p>
+                <strong>Ask Coach Peach AI</strong> uses
+                artificial intelligence technology provided
+                by OpenAI, together with approved Peach Suite Pro
+                Knowledge Base articles, to help answer questions
+                about the software.
+            </p>
+
+            <p>
+                Coach Peach provides informational guidance
+                and cannot directly change business records.
             </p>
         </div>
 
