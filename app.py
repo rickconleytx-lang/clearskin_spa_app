@@ -4151,8 +4151,9 @@ def _load_public_support_category(
               AND BTRIM(hp.content) <> ''
 
             ORDER BY
-                ht.display_order NULLS LAST,
-                hp.title
+                LOWER(hp.title),
+                hp.title,
+                ht.page_key
             """,
             (
                 language_code,
