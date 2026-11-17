@@ -3056,6 +3056,28 @@ def coach_peach_help_api():
             ),
         }), 400
 
+    # Coach Peach's optional, local Happy Hour Easter egg.
+    # All existing authentication, CSRF, enablement and
+    # request-validation checks have already passed.
+    # No article retrieval, AI reservation, or provider call.
+    from services.psp_ai_help_easter_eggs import (
+        get_coach_peach_easter_egg,
+    )
+
+    special_answer = get_coach_peach_easter_egg(
+        question=question,
+        language=get_current_language(),
+    )
+
+    if special_answer is not None:
+        response = jsonify({
+            "success": True,
+            "answer": special_answer,
+            "articles": [],
+        })
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     spa_id, business_unit_id, user_id = identity
     model, pricing_id = settings
 
