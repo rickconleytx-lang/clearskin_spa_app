@@ -64822,6 +64822,47 @@ def master_admin_website_publish_draft():
 
 
 @app.route(
+    "/master-admin/website/home/history",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_home_history():
+    """Display read-only Home Page revision and publication history."""
+    from flask import make_response
+    from services.psp_marketing_cms_history import (
+        load_home_history,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        history = load_home_history(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(
+        render_template(
+            "master_admin_website_history.html",
+            history=history,
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
     "/master-admin/website/home/review",
     methods=["GET"],
 )

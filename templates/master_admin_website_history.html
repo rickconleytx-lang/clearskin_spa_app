@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a href="{{ url_for('master_admin_website_management') }}"
+       class="btn">
+        Back to Website Management
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        Home Page Revision History
+    </h1>
+
+    <p>
+        Review saved revisions and publication activity.
+        Historical content is read-only.
+        No changes are made from this screen.
+    </p>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Current Home Page State</h2>
+
+        <p>
+            <strong>Current Draft:</strong>
+            {% if history.draft_revision_id is not none %}
+                Revision ID {{ history.draft_revision_id }}
+            {% else %}
+                None
+            {% endif %}
+        </p>
+
+        <p>
+            <strong>Currently Published:</strong>
+            {% if history.published_revision_id is not none %}
+                Revision ID {{ history.published_revision_id }}
+            {% else %}
+                No CMS revision is currently published.
+            {% endif %}
+        </p>
+    </div>
+
+    <h2 style="margin-top: 32px;">
+        Saved Revisions
+    </h2>
+
+    {% if history.revisions %}
+
+        {% for revision in history.revisions %}
+
+        <div style="border: 1px solid #bbb;
+                    border-radius: 12px;
+                    padding: 22px;
+                    margin-top: 16px;">
+
+            <h3 style="margin-top: 0;">
+                Revision {{ revision.revision_number }}
+            </h3>
+
+            <p>
+                <strong>Revision ID:</strong>
+                {{ revision.revision_id }}
+            </p>
+
+            <p>
+                <strong>Status:</strong>
+
+                {% if revision.is_published %}
+                    <strong>Currently Published</strong>
+                {% elif revision.was_published %}
+                    Previously Published
+                {% else %}
+                    Never Published
+                {% endif %}
+
+                {% if revision.is_draft %}
+                    — Current Draft
+                {% endif %}
+            </p>
+
+            <p>
+                <strong>Created:</strong>
+                {{ revision.created_at }}
+            </p>
+
+            <p>
+                <strong>Created by Administrator ID:</strong>
+                {{ revision.created_by }}
+            </p>
+
+            {% if revision.change_note %}
+            <p>
+                <strong>Change Note:</strong>
+                {{ revision.change_note }}
+            </p>
+            {% endif %}
+
+            <div style="margin-top: 20px;">
+                <strong>Primary Button Text</strong>
+                <p>{{ revision.hero.primary_button_text }}</p>
+            </div>
+
+            <div style="margin-top: 16px;">
+                <strong>Secondary Button Text</strong>
+                <p>{{ revision.hero.secondary_button_text }}</p>
+            </div>
+
+            <div style="margin-top: 16px;">
+                <strong>Pricing Sentence</strong>
+                <p>{{ revision.hero.pricing_sentence }}</p>
+            </div>
+        </div>
+
+        {% endfor %}
+
+    {% else %}
+
+        <p>No saved Home Page revisions yet.</p>
+
+    {% endif %}
+
+    <h2 style="margin-top: 32px;">
+        Publication Activity
+    </h2>
+
+    {% if history.events %}
+
+        {% for event in history.events %}
+
+        <div style="border: 1px solid #bbb;
+                    border-radius: 12px;
+                    padding: 18px 22px;
+                    margin-top: 12px;">
+
+            <h3 style="margin-top: 0;">
+                {{ event.action | capitalize }}
+                — Revision ID {{ event.revision_id }}
+            </h3>
+
+            <p>
+                <strong>Previous Published Revision:</strong>
+                {% if event.previous_revision_id is not none %}
+                    {{ event.previous_revision_id }}
+                {% else %}
+                    None — first publication
+                {% endif %}
+            </p>
+
+            <p>
+                <strong>Performed:</strong>
+                {{ event.performed_at }}
+            </p>
+
+            <p>
+                <strong>Administrator ID:</strong>
+                {{ event.performed_by }}
+            </p>
+
+            <p>
+                <strong>Publication Event ID:</strong>
+                {{ event.publication_event_id }}
+            </p>
+        </div>
+
+        {% endfor %}
+
+    {% else %}
+
+        <p>No publication events have been recorded.</p>
+
+    {% endif %}
+
+    <div style="margin-top: 28px;">
+        <a href="{{ url_for('master_admin_website_management') }}"
+           class="btn">
+            Back to Website Management
+        </a>
+    </div>
+
+</div>
+
+{% endblock %}
