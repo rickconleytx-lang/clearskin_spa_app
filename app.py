@@ -64649,6 +64649,88 @@ def master_admin_website_save_draft():
 
 
 @app.route(
+    "/master-admin/website/home/published",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_home_published():
+    """Open the published Home Page in local development."""
+    from flask import make_response
+    from urllib.parse import urlsplit
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+    from services.psp_marketing_cms_content import (
+        normalize_home_content,
+    )
+
+    hostname = urlsplit(
+        "http://" + request.host
+    ).hostname
+
+    # Production must open the real public marketing website.
+    # Never redirect local development to Production.
+    if hostname not in ("127.0.0.1", "localhost", "::1"):
+        return redirect(
+            "https://peachsuitepro.com/",
+            code=302,
+        )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    published_id = state["published_revision_id"]
+    published_content = state["published_content"]
+
+    if (
+        (published_id is None)
+        != (published_content is None)
+    ):
+        abort(500)
+
+    context = {
+        "contact_csrf_token": (
+            _public_security_csrf_token(
+                "public_contact"
+            )
+        ),
+    }
+
+    # Never read draft_content into the published viewer.
+    if published_content is not None:
+        context["cms_home_hero"] = (
+            normalize_home_content(
+                published_content
+            )["hero"]
+        )
+
+    response = make_response(
+        render_template(
+            "public_site/psp_home.html",
+            **context,
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
     "/master-admin/website",
     methods=["GET"],
 )
