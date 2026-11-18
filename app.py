@@ -5732,13 +5732,92 @@ def route_public_marketing_site():
         return None
 
     if request.path == "/":
-        return render_template(
-            "public_site/psp_home.html",
-            contact_csrf_token=(
+        from services.psp_marketing_cms_service import (
+            load_home_state,
+        )
+
+        published_hero = None
+        conn = None
+
+        try:
+            conn = get_db_connection()
+            state = load_home_state(conn)
+
+            # Never use draft_content for public rendering.
+            published = state["published_content"]
+
+            if published is not None:
+                hero = (
+                    published.get("hero")
+                    if isinstance(published, dict)
+                    else None
+                )
+
+                limits = {
+                    "primary_button_text": 80,
+                    "secondary_button_text": 80,
+                    "pricing_sentence": 300,
+                }
+
+                if (
+                    not isinstance(hero, dict)
+                    or set(hero) != set(limits)
+                    or any(
+                        not isinstance(hero[key], str)
+                        or not hero[key].strip()
+                        or len(hero[key]) > limit
+                        or "<" in hero[key]
+                        or ">" in hero[key]
+                        or any(
+                            ord(char) < 32
+                            or ord(char) == 127
+                            for char in hero[key]
+                        )
+                        for key, limit in limits.items()
+                    )
+                ):
+                    raise ValueError(
+                        "Invalid stored published Home Page content."
+                    )
+
+                published_hero = hero
+
+        except Exception:
+            app.logger.exception(
+                "Published marketing Home Page unavailable; "
+                "using existing website wording."
+            )
+
+        finally:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    app.logger.exception(
+                        "Marketing Home Page read rollback failed."
+                    )
+
+                try:
+                    conn.close()
+                except Exception:
+                    app.logger.exception(
+                        "Marketing Home Page connection close failed."
+                    )
+
+        context = {
+            "contact_csrf_token": (
                 _public_security_csrf_token(
                     "public_contact"
                 )
             ),
+        }
+
+        if published_hero is not None:
+            context["cms_home_hero"] = published_hero
+
+        return render_template(
+            "public_site/psp_home.html",
+            **context,
         )
 
     if request.path in {
