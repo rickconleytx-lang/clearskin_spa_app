@@ -1053,6 +1053,23 @@
 </head>
 
 <body>
+{% if cms_preview | default(false) %}
+<div role="status"
+     style="position: sticky; top: 0; z-index: 99999;
+            padding: 14px 22px; background: #173f4a;
+            color: white; display: flex; gap: 20px;
+            justify-content: space-between;
+            align-items: center; flex-wrap: wrap;
+            font-family: Arial, sans-serif;">
+    <strong>Master Admin — Draft Preview (Not Published)</strong>
+    <a href="{{ url_for('master_admin_website_management') }}"
+       style="color: white; font-weight: bold;
+              text-decoration: underline;">
+        Back to Website Management
+    </a>
+</div>
+{% endif %}
+
 
 <header class="site-header">
     <div class="container nav">
@@ -1105,16 +1122,16 @@
 
             <div class="hero-actions">
                 <a class="btn btn-primary" href="/signup/solo">
-                    Start Your 10-Day Free Trial
+                    {{ cms_home_hero.primary_button_text if cms_home_hero is defined else 'Start Your 10-Day Free Trial' }}
                 </a>
 
                 <a class="btn btn-secondary" href="/pricing">
-                    View Pricing
+                    {{ cms_home_hero.secondary_button_text if cms_home_hero is defined else 'View Pricing' }}
                 </a>
             </div>
 
             <div class="trial-note">
-                Solo is $49/month or $490/year after the 10-day free trial.
+                {{ cms_home_hero.pricing_sentence if cms_home_hero is defined else 'Solo is $49/month or $490/year after the 10-day free trial.' }}
             </div>
         </div>
 

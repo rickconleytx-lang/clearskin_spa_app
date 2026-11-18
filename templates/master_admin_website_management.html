@@ -99,10 +99,19 @@
 
         </form>
 
+        {% if draft_revision_id is not none %}
+        <div style="margin-top: 16px;">
+            <a class="btn"
+               href="{{ url_for('master_admin_website_home_preview') }}">
+                Preview Draft
+            </a>
+        </div>
+        {% endif %}
+
         <p style="margin-top: 24px;">
             <em>
                 Draft changes remain private.
-                Preview and Publish are not enabled yet.
+                Preview is available. Publishing is not enabled yet.
             </em>
         </p>
     </div>

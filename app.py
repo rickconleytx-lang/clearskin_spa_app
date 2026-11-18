@@ -64616,6 +64616,87 @@ def master_admin_website_management():
     )
 
 
+@app.route(
+    "/master-admin/website/home/preview",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_home_preview():
+    """Preview a saved Home Page draft without publishing."""
+    from flask import make_response
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is None:
+        flash(
+            "Save a Home Page draft before previewing.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_management")
+        )
+
+    saved = state["draft_content"]
+    hero = (
+        saved.get("hero")
+        if isinstance(saved, dict)
+        else None
+    )
+
+    required = {
+        "primary_button_text": 80,
+        "secondary_button_text": 80,
+        "pricing_sentence": 300,
+    }
+
+    if (
+        not isinstance(hero, dict)
+        or set(hero) != set(required)
+        or any(
+            not isinstance(hero[key], str)
+            or not hero[key].strip()
+            or len(hero[key]) > maximum
+            or any(ord(char) < 32 for char in hero[key])
+            or "<" in hero[key]
+            or ">" in hero[key]
+            for key, maximum in required.items()
+        )
+    ):
+        abort(500)
+
+    response = make_response(
+        render_template(
+            "public_site/psp_home.html",
+            cms_preview=True,
+            cms_home_hero=hero,
+            contact_csrf_token=_public_security_csrf_token(
+                "public_contact"
+            ),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
 @app.route("/master-admin")
 @login_required
 @master_admin_required
