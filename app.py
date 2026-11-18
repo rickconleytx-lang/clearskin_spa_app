@@ -64471,6 +64471,105 @@ def master_admin_ai_financial():
 
 
 @app.route(
+    "/master-admin/website/home/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_save_draft():
+    """Save private Home Page content without publishing it."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        save_home_draft,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor_id = session.get("user_id")
+    try:
+        if isinstance(raw_actor_id, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor_id)
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+        expected_revision = int(raw_expected)
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    content = {
+        "hero": {
+            "primary_button_text": request.form.get(
+                "primary_button_text", ""
+            ),
+            "secondary_button_text": request.form.get(
+                "secondary_button_text", ""
+            ),
+            "pricing_sentence": request.form.get(
+                "pricing_sentence", ""
+            ),
+        }
+    }
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = save_home_draft(
+                conn,
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer Home Page draft exists. "
+                "Reload and review it before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Home Page draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+    return redirect(
+        url_for("master_admin_website_management")
+    )
+
+
+@app.route(
     "/master-admin/website",
     methods=["GET"],
 )
@@ -64512,6 +64611,8 @@ def master_admin_website_management():
         "master_admin_website_management.html",
         home_hero=home_hero,
         content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
     )
 
 

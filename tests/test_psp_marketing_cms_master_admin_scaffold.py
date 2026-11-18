@@ -39,12 +39,38 @@ def master_admin_website_management():"""
     def test_page_template_parses(self):
         Environment().parse(self.page)
 
-    def test_initial_page_is_read_only(self):
-        self.assertEqual(self.page.count("readonly"), 3)
-        self.assertNotIn("<form", self.page.lower())
-        self.assertNotIn(
-            'type="submit"', self.page.lower()
+    def test_page_has_protected_draft_form(self):
+        self.assertEqual(self.page.count("<form"), 1)
+        self.assertEqual(self.page.count("</form>"), 1)
+        self.assertIn('method="POST"', self.page)
+        self.assertIn(
+            "master_admin_website_save_draft",
+            self.page,
         )
+        self.assertIn(
+            'name="security_csrf_token"',
+            self.page,
+        )
+        self.assertIn(
+            'name="expected_draft_revision_id"',
+            self.page,
+        )
+        self.assertIn(
+            'name="primary_button_text"',
+            self.page,
+        )
+        self.assertIn(
+            'name="secondary_button_text"',
+            self.page,
+        )
+        self.assertIn(
+            'name="pricing_sentence"',
+            self.page,
+        )
+        self.assertEqual(
+            self.page.count('type="submit"'), 1
+        )
+        self.assertNotIn("readonly", self.page)
 
 
 if __name__ == "__main__":

@@ -24,9 +24,25 @@
         <h2>Home Page</h2>
 
         <p>
-            These fields display {{ content_source }}.
-            Editing is not enabled yet.
+            Editing {{ content_source }}.
+            Save Draft stores changes privately without
+            changing the public website.
         </p>
+
+        <form
+            method="POST"
+            action="{{ url_for('master_admin_website_save_draft') }}"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+            <input
+                type="hidden"
+                name="expected_draft_revision_id"
+                value="{{ draft_revision_id if draft_revision_id is not none else '' }}"
+            >
 
         <div style="margin-top: 20px;">
             <label for="cms-primary-button">
@@ -34,9 +50,11 @@
             </label>
             <input
                 id="cms-primary-button"
+                name="primary_button_text"
+                maxlength="80"
+                required
                 type="text"
                 value="{{ home_hero.primary_button_text }}"
-                readonly
                 style="display: block; width: 100%;
                        box-sizing: border-box; margin-top: 6px;"
             >
@@ -48,9 +66,11 @@
             </label>
             <input
                 id="cms-secondary-button"
+                name="secondary_button_text"
+                maxlength="80"
+                required
                 type="text"
                 value="{{ home_hero.secondary_button_text }}"
-                readonly
                 style="display: block; width: 100%;
                        box-sizing: border-box; margin-top: 6px;"
             >
@@ -62,17 +82,27 @@
             </label>
             <textarea
                 id="cms-pricing-sentence"
+                name="pricing_sentence"
+                maxlength="300"
+                required
                 rows="3"
-                readonly
                 style="display: block; width: 100%;
                        box-sizing: border-box; margin-top: 6px;"
             >{{ home_hero.pricing_sentence }}</textarea>
         </div>
 
+            <div style="margin-top: 24px;">
+                <button type="submit" class="btn">
+                    Save Draft
+                </button>
+            </div>
+
+        </form>
+
         <p style="margin-top: 24px;">
             <em>
-                Read-only development preview.
-                Saving and publishing are not enabled.
+                Draft changes remain private.
+                Preview and Publish are not enabled yet.
             </em>
         </p>
     </div>

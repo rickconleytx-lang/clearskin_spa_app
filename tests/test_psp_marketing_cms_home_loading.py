@@ -35,7 +35,16 @@ class MarketingCMSHomeLoadingTests(unittest.TestCase):
     def invoke_route(self, state=None, error=None):
         conn = MagicMock()
 
+        if state is not None:
+            state = {
+                "draft_revision_id": None,
+                **state,
+            }
+
         namespace = {
+            "_security_form_csrf_token": (
+                lambda: "unit-test-token"
+            ),
             "get_db_connection": lambda: conn,
             "render_template": (
                 lambda name, **kwargs: {
@@ -132,6 +141,20 @@ class MarketingCMSHomeLoadingTests(unittest.TestCase):
     def test_connection_closed_after_database_error(self):
         self.invoke_route(
             error=RuntimeError("Simulated database error")
+        )
+
+
+    def test_form_receives_revision_and_csrf_token(self):
+        result = self.invoke_route({
+            "draft_revision_id": 42,
+            "draft_content": None,
+            "published_content": None,
+        })
+
+        self.assertEqual(result["draft_revision_id"], 42)
+        self.assertEqual(
+            result["security_csrf_token"],
+            "unit-test-token",
         )
 
 
