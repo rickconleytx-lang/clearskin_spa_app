@@ -64822,6 +64822,227 @@ def master_admin_website_publish_draft():
 
 
 @app.route(
+    "/master-admin/website/home/restore",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_restore_revision():
+    """Restore a previously published Home Page revision."""
+    from services.psp_marketing_cms_publication import (
+        MarketingCMSUnpublishedRevision,
+        restore_home_revision,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        str(
+            request.form.get("restore_confirmation") or ""
+        ).strip()
+        != "RESTORE"
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid administrator")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid administrator")
+
+    except (TypeError, ValueError):
+        abort(403)
+
+    def parse_required_revision(field):
+        raw = request.form.get(field)
+
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if (
+            not value
+            or len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if (
+            number <= 0
+            or number > 9223372036854775807
+        ):
+            abort(400)
+
+        return number
+
+    target_revision_id = parse_required_revision(
+        "revision_id"
+    )
+
+    expected_published_id = parse_required_revision(
+        "expected_published_revision_id"
+    )
+
+    if target_revision_id == expected_published_id:
+        abort(400)
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = restore_home_revision(
+                conn,
+                actor_id=actor_id,
+                revision_id=target_revision_id,
+                expected_published_revision_id=(
+                    expected_published_id
+                ),
+            )
+
+        except MarketingCMSUnpublishedRevision:
+            flash(
+                "This Home Page revision has never been "
+                "published and cannot be restored.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_home_history")
+            )
+
+        except MarketingCMSConflict:
+            flash(
+                "The currently published Home Page has "
+                "changed. Reload Revision History and "
+                "review it before restoring again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_home_history")
+            )
+
+    finally:
+        conn.close()
+
+    flash(
+        "Home Page revision "
+        f"{result['revision_id']} restored successfully. "
+        "The public Home Page will use this revision. "
+        "Your current draft has been preserved.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_home_history")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/restore/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_restore_review():
+    """Review a previously published revision without restoring."""
+    from flask import make_response
+    from services.psp_marketing_cms_history import (
+        load_home_history,
+    )
+
+    raw_revision_id = request.args.get("revision_id")
+
+    if raw_revision_id is None:
+        abort(404)
+
+    raw_revision_id = str(raw_revision_id).strip()
+
+    if (
+        not raw_revision_id
+        or len(raw_revision_id) > 19
+        or not raw_revision_id.isascii()
+        or not raw_revision_id.isdecimal()
+    ):
+        abort(404)
+
+    revision_id = int(raw_revision_id)
+
+    if not 0 < revision_id <= 9223372036854775807:
+        abort(404)
+
+    conn = get_db_connection()
+    try:
+        history = load_home_history(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    current_id = history["published_revision_id"]
+
+    if current_id is None or current_id == revision_id:
+        abort(404)
+
+    target = next(
+        (
+            revision for revision in history["revisions"]
+            if revision["revision_id"] == revision_id
+        ),
+        None,
+    )
+
+    current = next(
+        (
+            revision for revision in history["revisions"]
+            if revision["revision_id"] == current_id
+        ),
+        None,
+    )
+
+    if (
+        target is None
+        or current is None
+        or not target["was_published"]
+        or target["is_published"]
+        or not current["is_published"]
+    ):
+        abort(404)
+
+    response = make_response(
+        render_template(
+            "master_admin_website_restore_review.html",
+            target=target,
+            current=current,
+            draft_revision_id=history["draft_revision_id"],
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
     "/master-admin/website/home/history",
     methods=["GET"],
 )

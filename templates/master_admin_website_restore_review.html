@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a href="{{ url_for('master_admin_website_home_history') }}"
+       class="btn">
+        Back to Revision History
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        Review Home Page Restoration
+    </h1>
+
+    <p>
+        Compare the previously published version with
+        the currently published Home Page.
+        Reviewing does not change the website.
+    </p>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Revision to Restore</h2>
+
+        <p>
+            <strong>Revision:</strong>
+            {{ target.revision_number }}
+            (ID {{ target.revision_id }})
+        </p>
+
+        <p>
+            <strong>Status:</strong>
+            Previously Published
+        </p>
+
+        <p>
+            <strong>Created:</strong>
+            {{ target.created_at }}
+        </p>
+
+        <div style="margin-top: 20px;">
+            <strong>Primary Button Text</strong>
+            <p>{{ target.hero.primary_button_text }}</p>
+        </div>
+
+        <div style="margin-top: 16px;">
+            <strong>Secondary Button Text</strong>
+            <p>{{ target.hero.secondary_button_text }}</p>
+        </div>
+
+        <div style="margin-top: 16px;">
+            <strong>Pricing Sentence</strong>
+            <p>{{ target.hero.pricing_sentence }}</p>
+        </div>
+    </div>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Currently Published Home Page</h2>
+
+        <p>
+            <strong>Revision:</strong>
+            {{ current.revision_number }}
+            (ID {{ current.revision_id }})
+        </p>
+
+        <div style="margin-top: 20px;">
+            <strong>Primary Button Text</strong>
+            <p>{{ current.hero.primary_button_text }}</p>
+        </div>
+
+        <div style="margin-top: 16px;">
+            <strong>Secondary Button Text</strong>
+            <p>{{ current.hero.secondary_button_text }}</p>
+        </div>
+
+        <div style="margin-top: 16px;">
+            <strong>Pricing Sentence</strong>
+            <p>{{ current.hero.pricing_sentence }}</p>
+        </div>
+    </div>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Restoration Summary</h2>
+
+        <p>
+            If you later confirm restoration,
+            Revision {{ target.revision_number }}
+            will replace Revision {{ current.revision_number }}
+            as the publicly displayed version.
+        </p>
+
+        <p>
+            The current saved draft
+            {% if draft_revision_id is not none %}
+                (Revision ID {{ draft_revision_id }})
+            {% endif %}
+            will be preserved.
+            Previous revisions and publication history
+            will also be retained.
+        </p>
+
+        <p>
+            <strong>Current status:</strong>
+            Reviewing this screen does not change the website.
+            Restoration requires the separate confirmation below.
+        </p>
+    </div>
+
+    <form method="POST"
+          action="{{ url_for('master_admin_website_restore_revision') }}"
+          style="border: 1px solid #bbb;
+                 border-radius: 12px;
+                 padding: 22px;
+                 margin-top: 24px;">
+
+        <h2>Confirm Restoration</h2>
+
+        <p>
+            This will replace the currently published Home Page
+            Revision {{ current.revision_number }} with
+            Revision {{ target.revision_number }}.
+            Your saved draft, prior revisions, and publication
+            history will be preserved.
+        </p>
+
+        <input type="hidden"
+               name="security_csrf_token"
+               value="{{ security_csrf_token }}">
+
+        <input type="hidden"
+               name="revision_id"
+               value="{{ target.revision_id }}">
+
+        <input type="hidden"
+               name="expected_published_revision_id"
+               value="{{ current.revision_id }}">
+
+        <label for="cms-restore-confirmation">
+            <strong>Type RESTORE to confirm</strong>
+        </label>
+
+        <input id="cms-restore-confirmation"
+               type="text"
+               name="restore_confirmation"
+               required
+               pattern="RESTORE"
+               maxlength="7"
+               autocomplete="off"
+               spellcheck="false"
+               placeholder="RESTORE"
+               style="display: block;
+                      width: 100%;
+                      max-width: 450px;
+                      box-sizing: border-box;
+                      padding: 10px;
+                      margin: 12px 0 18px;">
+
+        <button type="submit" class="btn">
+            Restore Revision {{ target.revision_number }}
+        </button>
+    </form>
+
+    <div style="margin-top: 24px;">
+        <a href="{{ url_for('master_admin_website_home_history') }}"
+           class="btn">
+            Return Without Restoring
+        </a>
+    </div>
+
+</div>
+
+{% endblock %}

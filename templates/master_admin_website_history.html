@@ -100,6 +100,15 @@
             </p>
             {% endif %}
 
+            {% if revision.was_published and not revision.is_published %}
+            <div style="margin-top: 18px;">
+                <a class="btn"
+                   href="{{ url_for('master_admin_website_restore_review') }}?revision_id={{ revision.revision_id }}">
+                    Review Restoration
+                </a>
+            </div>
+            {% endif %}
+
             <div style="margin-top: 20px;">
                 <strong>Primary Button Text</strong>
                 <p>{{ revision.hero.primary_button_text }}</p>
