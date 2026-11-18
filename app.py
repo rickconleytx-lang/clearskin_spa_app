@@ -64470,6 +64470,19 @@ def master_admin_ai_financial():
         conn.close()
 
 
+@app.route(
+    "/master-admin/website",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_management():
+    """Read-only corporate website management landing page."""
+    return render_template(
+        "master_admin_website_management.html"
+    )
+
+
 @app.route("/master-admin")
 @login_required
 @master_admin_required

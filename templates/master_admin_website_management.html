@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a href="{{ url_for('master_admin_home') }}" class="btn">
+        Back to Master Admin
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        Website Management
+    </h1>
+
+    <p>
+        Manage the public Peach Suite Pro marketing website.
+    </p>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Home Page</h2>
+
+        <p>
+            These fields display the current website wording
+            for reference. Editing is not enabled yet.
+        </p>
+
+        <div style="margin-top: 20px;">
+            <label for="cms-primary-button">
+                <strong>Primary Button Text</strong>
+            </label>
+            <input
+                id="cms-primary-button"
+                type="text"
+                value="Start Your 10-Day Free Trial"
+                readonly
+                style="display: block; width: 100%;
+                       box-sizing: border-box; margin-top: 6px;"
+            >
+        </div>
+
+        <div style="margin-top: 20px;">
+            <label for="cms-secondary-button">
+                <strong>Secondary Button Text</strong>
+            </label>
+            <input
+                id="cms-secondary-button"
+                type="text"
+                value="View Pricing"
+                readonly
+                style="display: block; width: 100%;
+                       box-sizing: border-box; margin-top: 6px;"
+            >
+        </div>
+
+        <div style="margin-top: 20px;">
+            <label for="cms-pricing-sentence">
+                <strong>Pricing Sentence</strong>
+            </label>
+            <textarea
+                id="cms-pricing-sentence"
+                rows="3"
+                readonly
+                style="display: block; width: 100%;
+                       box-sizing: border-box; margin-top: 6px;"
+            >Solo is $49/month or $490/year after the 10-day free trial.</textarea>
+        </div>
+
+        <p style="margin-top: 24px;">
+            <em>
+                Read-only development preview.
+                Saving and publishing are not enabled.
+            </em>
+        </p>
+    </div>
+
+    <div style="margin-top: 28px;">
+        <h2>Additional Website Pages</h2>
+        <p>
+            Subscription Packages and Pricing will be added
+            after the Home Page editor is verified.
+        </p>
+    </div>
+
+</div>
+
+{% endblock %}
