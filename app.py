@@ -64696,6 +64696,214 @@ def master_admin_website_management():
 
 
 @app.route(
+    "/master-admin/website/home/publish",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_publish_draft():
+    """Publish an explicitly confirmed Home Page revision."""
+    from services.psp_marketing_cms_publication import (
+        publish_home_draft,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        str(
+            request.form.get("publish_confirmation") or ""
+        ).strip()
+        != "PUBLISH"
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+
+    except (TypeError, ValueError):
+        abort(403)
+
+    def parse_revision(field, *, required):
+        raw = request.form.get(field)
+
+        # Both fields must be present. An empty published
+        # revision ID explicitly means nothing is published.
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if not value:
+            if required:
+                abort(400)
+            return None
+
+        if (
+            len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if (
+            number <= 0
+            or number > 9223372036854775807
+        ):
+            abort(400)
+
+        return number
+
+    draft_revision_id = parse_revision(
+        "expected_draft_revision_id",
+        required=True,
+    )
+
+    published_revision_id = parse_revision(
+        "expected_published_revision_id",
+        required=False,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = publish_home_draft(
+                conn,
+                actor_id=actor_id,
+                expected_draft_revision_id=(
+                    draft_revision_id
+                ),
+                expected_published_revision_id=(
+                    published_revision_id
+                ),
+            )
+
+        except MarketingCMSConflict:
+            flash(
+                "The Home Page draft or published "
+                "revision has changed. Reload Website "
+                "Management and review it before "
+                "publishing again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+
+    finally:
+        conn.close()
+
+    flash(
+        "Home Page revision "
+        f"{result['revision_id']} published successfully. "
+        "The public Home Page will use this revision.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_management")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_publish_review():
+    """Review saved Home Page content without publishing."""
+    from flask import make_response
+    from services.psp_marketing_cms_content import (
+        normalize_home_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if (
+        state["draft_revision_id"] is None
+        or state["draft_content"] is None
+    ):
+        flash(
+            "Save a Home Page draft before "
+            "reviewing it for publication.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_management")
+        )
+
+    draft_hero = normalize_home_content(
+        state["draft_content"]
+    )["hero"]
+
+    published_revision_id = state[
+        "published_revision_id"
+    ]
+    published_content = state["published_content"]
+
+    if (
+        (published_revision_id is None)
+        != (published_content is None)
+    ):
+        abort(500)
+
+    published_hero = None
+
+    if published_content is not None:
+        published_hero = normalize_home_content(
+            published_content
+        )["hero"]
+
+    response = make_response(
+        render_template(
+            "master_admin_website_publish_review.html",
+            draft_revision_id=state["draft_revision_id"],
+            draft_hero=draft_hero,
+            published_revision_id=published_revision_id,
+            published_hero=published_hero,
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
     "/master-admin/website/home/preview",
     methods=["GET"],
 )

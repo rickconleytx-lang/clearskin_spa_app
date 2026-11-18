@@ -314,7 +314,7 @@ class MarketingCMSPreviewTests(unittest.TestCase):
             self.editor,
         )
         self.assertIn(
-            "Publishing is not enabled yet.",
+            "Publishing requires explicit confirmation on the review screen.",
             self.editor,
         )
         self.assertNotIn(

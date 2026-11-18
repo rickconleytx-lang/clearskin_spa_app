@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a href="{{ url_for('master_admin_website_management') }}"
+       class="btn">
+        Back to Website Management
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        Review Home Page Publication
+    </h1>
+
+    <p>
+        Review the saved draft carefully. Publishing occurs only
+        after you enter PUBLISH and submit the confirmation form.
+    </p>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Saved Draft</h2>
+
+        <p>
+            <strong>Draft Revision ID:</strong>
+            {{ draft_revision_id }}
+        </p>
+
+        <div style="margin-top: 20px;">
+            <strong>Primary Button Text</strong>
+            <p>{{ draft_hero.primary_button_text }}</p>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <strong>Secondary Button Text</strong>
+            <p>{{ draft_hero.secondary_button_text }}</p>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <strong>Pricing Sentence</strong>
+            <p>{{ draft_hero.pricing_sentence }}</p>
+        </div>
+
+        <div style="margin-top: 24px;">
+            <a class="btn"
+               href="{{ url_for('master_admin_website_home_preview') }}">
+                Preview Saved Draft
+            </a>
+        </div>
+    </div>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Currently Published Home Page</h2>
+
+        {% if published_revision_id is not none %}
+
+        <p>
+            <strong>Published Revision ID:</strong>
+            {{ published_revision_id }}
+        </p>
+
+        <div style="margin-top: 20px;">
+            <strong>Primary Button Text</strong>
+            <p>{{ published_hero.primary_button_text }}</p>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <strong>Secondary Button Text</strong>
+            <p>{{ published_hero.secondary_button_text }}</p>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <strong>Pricing Sentence</strong>
+            <p>{{ published_hero.pricing_sentence }}</p>
+        </div>
+
+        {% else %}
+
+        <p>
+            No CMS revision has been published yet.
+            The public Home Page continues to use
+            the existing website wording.
+        </p>
+
+        {% endif %}
+    </div>
+
+    <div style="margin-top: 24px;">
+        <p>
+            <strong>Publication status:</strong>
+            Publication requires explicit confirmation.
+            Nothing changes until you submit the form below.
+        </p>
+
+        {% if draft_revision_id != published_revision_id %}
+        <form method="POST"
+              action="{{ url_for('master_admin_website_publish_draft') }}"
+              style="border: 1px solid #bbb;
+                     border-radius: 12px;
+                     padding: 22px;
+                     margin: 24px 0;">
+
+            <h2>Confirm Publication</h2>
+
+            <p>
+                Publishing makes Draft Revision
+                <strong>{{ draft_revision_id }}</strong>
+                the public Home Page version in this environment.
+            </p>
+
+            <input type="hidden"
+                   name="security_csrf_token"
+                   value="{{ security_csrf_token }}">
+
+            <input type="hidden"
+                   name="expected_draft_revision_id"
+                   value="{{ draft_revision_id }}">
+
+            <input type="hidden"
+                   name="expected_published_revision_id"
+                   value="{{ published_revision_id if published_revision_id is not none else '' }}">
+
+            <label for="cms-publish-confirmation">
+                <strong>Type PUBLISH to confirm</strong>
+            </label>
+
+            <input
+                id="cms-publish-confirmation"
+                type="text"
+                name="publish_confirmation"
+                required
+                pattern="PUBLISH"
+                maxlength="7"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="PUBLISH"
+                style="display: block;
+                       width: 100%;
+                       box-sizing: border-box;
+                       max-width: 420px;
+                       margin: 10px 0 20px;"
+            >
+
+            <button type="submit" class="btn">
+                Publish This Revision
+            </button>
+        </form>
+        {% else %}
+        <p>
+            This draft revision is already published.
+            Save a new draft to publish additional changes.
+        </p>
+        {% endif %}
+
+        <a href="{{ url_for('master_admin_website_management') }}"
+           class="btn">
+            Return Without Publishing
+        </a>
+    </div>
+
+</div>
+
+{% endblock %}

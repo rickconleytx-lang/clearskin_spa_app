@@ -106,12 +106,19 @@
                 Preview Draft
             </a>
         </div>
+
+        <div style="margin-top: 12px;">
+            <a class="btn"
+               href="{{ url_for('master_admin_website_publish_review') }}">
+                Review for Publishing
+            </a>
+        </div>
         {% endif %}
 
         <p style="margin-top: 24px;">
             <em>
                 Draft changes remain private.
-                Preview is available. Publishing is not enabled yet.
+                Preview is available. Publishing requires explicit confirmation on the review screen.
             </em>
         </p>
     </div>
