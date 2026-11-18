@@ -64477,9 +64477,41 @@ def master_admin_ai_financial():
 @login_required
 @master_admin_required
 def master_admin_website_management():
-    """Read-only corporate website management landing page."""
+    """Display CMS Home Page content for Master Admin only."""
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        home_hero = state["draft_content"]["hero"]
+        content_source = "saved draft"
+    elif state["published_content"] is not None:
+        home_hero = state["published_content"]["hero"]
+        content_source = "published content"
+    else:
+        home_hero = {
+            "primary_button_text": "Start Your 10-Day Free Trial",
+            "secondary_button_text": "View Pricing",
+            "pricing_sentence": (
+                "Solo is $49/month or $490/year "
+                "after the 10-day free trial."
+            ),
+        }
+        content_source = "existing website wording"
+
     return render_template(
-        "master_admin_website_management.html"
+        "master_admin_website_management.html",
+        home_hero=home_hero,
+        content_source=content_source,
     )
 
 

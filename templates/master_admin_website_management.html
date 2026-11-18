@@ -24,8 +24,8 @@
         <h2>Home Page</h2>
 
         <p>
-            These fields display the current website wording
-            for reference. Editing is not enabled yet.
+            These fields display {{ content_source }}.
+            Editing is not enabled yet.
         </p>
 
         <div style="margin-top: 20px;">
@@ -35,7 +35,7 @@
             <input
                 id="cms-primary-button"
                 type="text"
-                value="Start Your 10-Day Free Trial"
+                value="{{ home_hero.primary_button_text }}"
                 readonly
                 style="display: block; width: 100%;
                        box-sizing: border-box; margin-top: 6px;"
@@ -49,7 +49,7 @@
             <input
                 id="cms-secondary-button"
                 type="text"
-                value="View Pricing"
+                value="{{ home_hero.secondary_button_text }}"
                 readonly
                 style="display: block; width: 100%;
                        box-sizing: border-box; margin-top: 6px;"
@@ -66,7 +66,7 @@
                 readonly
                 style="display: block; width: 100%;
                        box-sizing: border-box; margin-top: 6px;"
-            >Solo is $49/month or $490/year after the 10-day free trial.</textarea>
+            >{{ home_hero.pricing_sentence }}</textarea>
         </div>
 
         <p style="margin-top: 24px;">
