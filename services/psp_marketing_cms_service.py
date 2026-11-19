@@ -13,6 +13,9 @@ from psycopg2.extras import Json
 from services.psp_marketing_cms_content import (
     normalize_home_content,
 )
+from services.psp_marketing_cms_sections import (
+    get_section_spec,
+)
 
 HOME_PAGE_KEY = "home"
 
@@ -54,12 +57,14 @@ def _check_expected_revision(revision_id):
         )
 
 
-def load_home_state(connection):
-    """Read current draft and published Home Page revisions.
+def load_section_state(connection, *, section_key):
+    """Read draft and published revisions for a registered section.
 
     A missing draft or published revision returns None.
     This method never changes publication state.
     """
+
+    section = get_section_spec(section_key)
 
     with connection.cursor() as cur:
         cur.execute(
@@ -79,14 +84,14 @@ def load_home_state(connection):
                  state.published_revision_id
             WHERE state.page_key = %s
             """,
-            (HOME_PAGE_KEY,),
+            (section.key,),
         )
 
         row = cur.fetchone()
 
     if row is None:
         raise MarketingCMSNotFound(
-            "Marketing Home Page state is missing."
+            "Marketing content section state is missing."
         )
 
     return {
@@ -95,6 +100,14 @@ def load_home_state(connection):
         "published_revision_id": row[2],
         "published_content": row[3],
     }
+
+
+def load_home_state(connection):
+    """Backward-compatible Home Page state reader."""
+    return load_section_state(
+        connection,
+        section_key=HOME_PAGE_KEY,
+    )
 
 
 def save_home_draft(

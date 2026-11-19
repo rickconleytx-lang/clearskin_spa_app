@@ -1,4 +1,5 @@
 import unittest
+from services.psp_marketing_cms_sections import MarketingCMSSectionError
 from unittest.mock import MagicMock
 
 from services.psp_marketing_cms_content import (
@@ -9,6 +10,7 @@ from services.psp_marketing_cms_service import (
     MarketingCMSConfigurationError,
     MarketingCMSNotFound,
     load_home_state,
+    load_section_state,
     save_home_draft,
 )
 
@@ -232,6 +234,46 @@ class MarketingCMSServiceTests(unittest.TestCase):
 
         conn.rollback.assert_called_once()
         conn.commit.assert_not_called()
+
+
+
+class MarketingCMSSectionLoadingTests(unittest.TestCase):
+
+    def test_loads_independent_registered_section(self):
+        conn, cursor = fake_connection([
+            (
+                12,
+                {"promotion": {"title": "Draft"}},
+                9,
+                {"promotion": {"title": "Published"}},
+            )
+        ])
+
+        state = load_section_state(
+            conn,
+            section_key="home.promo",
+        )
+
+        self.assertEqual(state["draft_revision_id"], 12)
+        self.assertEqual(state["published_revision_id"], 9)
+
+        self.assertEqual(
+            cursor.execute.call_args.args[1],
+            ("home.promo",),
+        )
+
+        conn.commit.assert_not_called()
+
+    def test_rejects_unknown_section_before_sql(self):
+        conn, _ = fake_connection([])
+
+        with self.assertRaises(MarketingCMSSectionError):
+            load_section_state(
+                conn,
+                section_key="unsupported.section",
+            )
+
+        conn.cursor.assert_not_called()
 
 
 if __name__ == "__main__":
