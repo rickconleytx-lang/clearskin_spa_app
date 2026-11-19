@@ -12,6 +12,7 @@ from services.psp_marketing_cms_service import (
     load_home_state,
     load_section_state,
     save_home_draft,
+    save_section_draft,
 )
 
 
@@ -271,6 +272,192 @@ class MarketingCMSSectionLoadingTests(unittest.TestCase):
             load_section_state(
                 conn,
                 section_key="unsupported.section",
+            )
+
+        conn.cursor.assert_not_called()
+
+
+
+def promotion_content():
+    return {
+        "promotion": {
+            "product_label": "Solo",
+            "headline": "One business.\nOne owner.\nOne connected system.",
+            "monthly_price": "$49",
+            "pricing_description": (
+                "Or $490/year. Start with a 10-day free trial."
+            ),
+            "features": [
+                "Client Management",
+                "Appointment Calendar",
+                "PeachBook",
+                "PeachWeb",
+                "Income & Expenses",
+                "Inventory",
+                "Coach Peach",
+                "Square Integration",
+                "Import & Export",
+            ],
+        }
+    }
+
+
+class MarketingCMSSectionDraftTests(unittest.TestCase):
+
+    def test_saves_first_promotion_draft(self):
+        conn, cursor = fake_connection([
+            (None,),
+            (1,),
+            (501,),
+        ])
+
+        result = save_section_draft(
+            conn,
+            section_key="home.promo",
+            content=promotion_content(),
+            actor_id=1,
+            expected_draft_revision_id=None,
+        )
+
+        self.assertEqual(result["page_key"], "home.promo")
+        self.assertEqual(result["revision_id"], 501)
+        self.assertEqual(result["revision_number"], 1)
+        self.assertIn(
+            "\n",
+            result["content"]["promotion"]["headline"],
+        )
+
+        calls = cursor.execute.call_args_list
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(calls[0].args[1], ("home.promo",))
+        self.assertEqual(calls[1].args[1], ("home.promo",))
+        self.assertEqual(calls[2].args[1][0], "home.promo")
+        self.assertEqual(calls[3].args[1], (501, "home.promo"))
+        self.assertNotIn(
+            "published_revision_id",
+            calls[3].args[0],
+        )
+
+        conn.commit.assert_called_once()
+        conn.rollback.assert_not_called()
+
+    def test_saves_following_promotion_revision(self):
+        conn, _ = fake_connection([
+            (501,),
+            (2,),
+            (502,),
+        ])
+
+        result = save_section_draft(
+            conn,
+            section_key="home.promo",
+            content=promotion_content(),
+            actor_id=1,
+            expected_draft_revision_id=501,
+        )
+
+        self.assertEqual(result["revision_number"], 2)
+        self.assertEqual(result["revision_id"], 502)
+        conn.commit.assert_called_once()
+
+    def test_rejects_stale_promotion_draft(self):
+        conn, cursor = fake_connection([(502,)])
+
+        with self.assertRaises(MarketingCMSConflict):
+            save_section_draft(
+                conn,
+                section_key="home.promo",
+                content=promotion_content(),
+                actor_id=1,
+                expected_draft_revision_id=501,
+            )
+
+        self.assertEqual(cursor.execute.call_count, 1)
+        conn.rollback.assert_called_once()
+        conn.commit.assert_not_called()
+
+    def test_missing_promotion_state_rolls_back(self):
+        conn, _ = fake_connection([None])
+
+        with self.assertRaises(MarketingCMSNotFound):
+            save_section_draft(
+                conn,
+                section_key="home.promo",
+                content=promotion_content(),
+                actor_id=1,
+                expected_draft_revision_id=None,
+            )
+
+        conn.rollback.assert_called_once()
+        conn.commit.assert_not_called()
+
+    def test_unknown_section_rejected_before_sql(self):
+        conn, _ = fake_connection([])
+
+        with self.assertRaises(MarketingCMSSectionError):
+            save_section_draft(
+                conn,
+                section_key="not.registered",
+                content=promotion_content(),
+                actor_id=1,
+                expected_draft_revision_id=None,
+            )
+
+        conn.cursor.assert_not_called()
+
+    def test_unimplemented_product_rejected_before_sql(self):
+        conn, _ = fake_connection([])
+
+        with self.assertRaises(MarketingCMSSectionError):
+            save_section_draft(
+                conn,
+                section_key="product.solo",
+                content=promotion_content(),
+                actor_id=1,
+                expected_draft_revision_id=None,
+            )
+
+        conn.cursor.assert_not_called()
+
+    def test_invalid_promotion_rejected_before_sql(self):
+        conn, _ = fake_connection([])
+
+        with self.assertRaises(MarketingContentError):
+            save_section_draft(
+                conn,
+                section_key="home.promo",
+                content={"promotion": {}},
+                actor_id=1,
+                expected_draft_revision_id=None,
+            )
+
+        conn.cursor.assert_not_called()
+
+    def test_home_content_cannot_be_saved_as_promotion(self):
+        conn, _ = fake_connection([])
+
+        with self.assertRaises(MarketingContentError):
+            save_section_draft(
+                conn,
+                section_key="home.promo",
+                content=valid_content(),
+                actor_id=1,
+                expected_draft_revision_id=None,
+            )
+
+        conn.cursor.assert_not_called()
+
+    def test_promotion_requires_transaction(self):
+        conn, _ = fake_connection([])
+        conn.autocommit = True
+
+        with self.assertRaises(MarketingCMSConfigurationError):
+            save_section_draft(
+                conn,
+                section_key="home.promo",
+                content=promotion_content(),
+                actor_id=1,
+                expected_draft_revision_id=None,
             )
 
         conn.cursor.assert_not_called()

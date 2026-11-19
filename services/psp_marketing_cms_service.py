@@ -12,8 +12,10 @@ from psycopg2.extras import Json
 
 from services.psp_marketing_cms_content import (
     normalize_home_content,
+    normalize_home_promotion_content,
 )
 from services.psp_marketing_cms_sections import (
+    MarketingCMSSectionError,
     get_section_spec,
 )
 
@@ -110,16 +112,17 @@ def load_home_state(connection):
     )
 
 
-def save_home_draft(
+def save_section_draft(
     connection,
     *,
+    section_key,
     content,
     actor_id,
     expected_draft_revision_id,
 ):
-    """Save one immutable Home Page draft revision.
+    """Save one immutable registered-section draft revision.
 
-    Lock the Home Page state row to serialize concurrent edits.
+    Lock the selected section state row to serialize concurrent edits.
     Reject stale submissions before inserting a revision.
 
     No published_revision_id is modified.
@@ -128,7 +131,16 @@ def save_home_draft(
     _check_actor_id(actor_id)
     _check_expected_revision(expected_draft_revision_id)
 
-    normalized = normalize_home_content(content)
+    section = get_section_spec(section_key)
+
+    if section.key == HOME_PAGE_KEY:
+        normalized = normalize_home_content(content)
+    elif section.key == "home.promo":
+        normalized = normalize_home_promotion_content(content)
+    else:
+        raise MarketingCMSSectionError(
+            "Draft saving is not yet supported for this section."
+        )
 
     if connection.autocommit:
         raise MarketingCMSConfigurationError(
@@ -144,14 +156,14 @@ def save_home_draft(
                 WHERE page_key = %s
                 FOR UPDATE
                 """,
-                (HOME_PAGE_KEY,),
+                (section.key,),
             )
 
             row = cur.fetchone()
 
             if row is None:
                 raise MarketingCMSNotFound(
-                    "Marketing Home Page state is missing."
+                    "Marketing content section state is missing."
                 )
 
             current_draft_id = row[0]
@@ -169,7 +181,7 @@ def save_home_draft(
                 FROM psp_marketing_revisions
                 WHERE page_key = %s
                 """,
-                (HOME_PAGE_KEY,),
+                (section.key,),
             )
 
             revision_number = int(cur.fetchone()[0])
@@ -186,7 +198,7 @@ def save_home_draft(
                 RETURNING revision_id
                 """,
                 (
-                    HOME_PAGE_KEY,
+                    section.key,
                     revision_number,
                     Json(normalized),
                     actor_id,
@@ -202,12 +214,12 @@ def save_home_draft(
                     updated_at = NOW()
                 WHERE page_key = %s
                 """,
-                (revision_id, HOME_PAGE_KEY),
+                (revision_id, section.key),
             )
 
             if cur.rowcount != 1:
                 raise MarketingCMSNotFound(
-                    "Unable to update Home Page draft state."
+                    "Unable to update marketing section draft state."
                 )
 
         connection.commit()
@@ -217,8 +229,25 @@ def save_home_draft(
         raise
 
     return {
-        "page_key": HOME_PAGE_KEY,
+        "page_key": section.key,
         "revision_id": revision_id,
         "revision_number": revision_number,
         "content": normalized,
     }
+
+
+def save_home_draft(
+    connection,
+    *,
+    content,
+    actor_id,
+    expected_draft_revision_id,
+):
+    """Backward-compatible Home Page draft-saving interface."""
+    return save_section_draft(
+        connection,
+        section_key=HOME_PAGE_KEY,
+        content=content,
+        actor_id=actor_id,
+        expected_draft_revision_id=expected_draft_revision_id,
+    )
