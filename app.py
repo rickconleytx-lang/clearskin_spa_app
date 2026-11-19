@@ -64649,6 +64649,120 @@ def master_admin_website_save_draft():
 
 
 @app.route(
+    "/master-admin/website/home/promotion/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_promotion_save_draft():
+    """Save a private Home Page promotion revision only."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        save_section_draft,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    content = {
+        "promotion": {
+            "product_label": request.form.get(
+                "product_label", ""
+            ),
+            "headline": request.form.get(
+                "headline", ""
+            ),
+            "monthly_price": request.form.get(
+                "monthly_price", ""
+            ),
+            "pricing_description": request.form.get(
+                "pricing_description", ""
+            ),
+            "features": [
+                request.form.get(f"feature_{i}", "")
+                for i in range(1, 10)
+            ],
+        }
+    }
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = save_section_draft(
+                conn,
+                section_key="home.promo",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer Product Promotion draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Product Promotion draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_management")
+    )
+
+
+@app.route(
     "/master-admin/website/home/published",
     methods=["GET"],
 )
