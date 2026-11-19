@@ -123,7 +123,9 @@ class MarketingCMSPromotionSaveRouteTests(unittest.TestCase):
                 flashes.append((message, category))
             ),
             "url_for": lambda endpoint: (
-                "/master-admin/website"
+                "/master-admin/website/home/promotion"
+                if endpoint == "master_admin_website_promotion_editor"
+                else "/master-admin/website"
             ),
             "redirect": lambda path: path,
         }
@@ -161,7 +163,7 @@ class MarketingCMSPromotionSaveRouteTests(unittest.TestCase):
 
         self.assertIsNone(result[1])
         self.assertEqual(
-            result[0], "/master-admin/website"
+            result[0], "/master-admin/website/home/promotion"
         )
 
         kwargs = result[2].call_args.kwargs
@@ -263,6 +265,29 @@ class MarketingCMSPromotionSaveRouteTests(unittest.TestCase):
         self.assertIsInstance(result[1], RuntimeError)
         result[3].close.assert_called_once()
         self.assertEqual(result[5], [])
+
+
+    def test_errors_return_to_promotion_editor(self):
+        for error in (
+            MarketingCMSConflict("stale"),
+            MarketingContentError("Invalid promotion"),
+        ):
+            with self.subTest(
+                error=type(error).__name__
+            ):
+                result = self.run_route(
+                    service_error=error
+                )
+
+                self.assertIsNone(result[1])
+                self.assertEqual(
+                    result[0],
+                    "/master-admin/website/home/promotion",
+                )
+                self.assertEqual(
+                    result[5][0][1],
+                    "error",
+                )
 
     def test_route_has_no_publication_operation(self):
         self.assertNotIn(

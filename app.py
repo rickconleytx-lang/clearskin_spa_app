@@ -64740,12 +64740,12 @@ def master_admin_website_promotion_save_draft():
                 "error",
             )
             return redirect(
-                url_for("master_admin_website_management")
+                url_for("master_admin_website_promotion_editor")
             )
         except MarketingContentError as exc:
             flash(str(exc), "error")
             return redirect(
-                url_for("master_admin_website_management")
+                url_for("master_admin_website_promotion_editor")
             )
     finally:
         conn.close()
@@ -64758,7 +64758,7 @@ def master_admin_website_promotion_save_draft():
     )
 
     return redirect(
-        url_for("master_admin_website_management")
+        url_for("master_admin_website_promotion_editor")
     )
 
 
@@ -64842,6 +64842,80 @@ def master_admin_website_home_published():
     response.headers["Referrer-Policy"] = "no-referrer"
 
     return response
+
+
+@app.route(
+    "/master-admin/website/home/promotion",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_promotion_editor():
+    """Display the independent private promotion editor."""
+    from services.psp_marketing_cms_content import (
+        normalize_home_promotion_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key="home.promo",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        promotion = normalize_home_promotion_content(
+            state["draft_content"]
+        )["promotion"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        promotion = normalize_home_promotion_content(
+            state["published_content"]
+        )["promotion"]
+        content_source = "published content"
+
+    else:
+        promotion = {
+            "product_label": "Solo",
+            "headline": (
+                "One business. One owner. "
+                "One connected system."
+            ),
+            "monthly_price": "$49",
+            "pricing_description": (
+                "Or $490/year. Start with a 10-day free trial."
+            ),
+            "features": [
+                "Client Management",
+                "Appointment Calendar",
+                "PeachBook",
+                "PeachWeb",
+                "Income & Expenses",
+                "Inventory",
+                "Coach Peach",
+                "Square Integration",
+                "Import & Export",
+            ],
+        }
+        content_source = "existing website wording"
+
+    return render_template(
+        "master_admin_website_promotion.html",
+        promotion=promotion,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
 
 
 @app.route(
