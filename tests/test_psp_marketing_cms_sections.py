@@ -14,18 +14,18 @@ from services.psp_marketing_cms_sections import (
 
 class MarketingCMSSectionsTests(unittest.TestCase):
 
-    def test_eight_independent_sections(self):
-        self.assertEqual(len(SECTION_REGISTRY), 8)
+    def test_nine_independent_sections(self):
+        self.assertEqual(len(SECTION_REGISTRY), 9)
 
     def test_legacy_home_key_preserved(self):
         spec = get_section_spec("home")
         self.assertEqual(spec.key, "home")
         self.assertEqual(spec.kind, "hero")
 
-    def test_solo_shared_across_three_pages(self):
+    def test_solo_shared_across_two_pages(self):
         self.assertEqual(
             get_section_spec("product.solo").surfaces,
-            ("home", "packages", "pricing"),
+            ("packages", "pricing"),
         )
 
     def test_other_products_shared_across_two_pages(self):
@@ -67,8 +67,38 @@ class MarketingCMSSectionsTests(unittest.TestCase):
                 "home",
                 "home.peachweb",
                 "home.peachbook",
-                "product.solo",
+                "home.promo",
             },
+        )
+
+    def test_home_promo_has_own_revision_identity(self):
+        promo = get_section_spec("home.promo")
+        solo = get_section_spec("product.solo")
+
+        self.assertNotEqual(promo.key, solo.key)
+        self.assertEqual(promo.kind, "promotion")
+        self.assertEqual(promo.surfaces, ("home",))
+        self.assertEqual(
+            solo.surfaces,
+            ("packages", "pricing"),
+        )
+
+    def test_home_page_does_not_duplicate_product_record(self):
+        sections = sections_for_surface("home")
+
+        self.assertEqual(
+            sum(
+                1 for section in sections
+                if section.kind == "promotion"
+            ),
+            1,
+        )
+
+        self.assertFalse(
+            any(
+                section.kind == "product"
+                for section in sections
+            )
         )
 
     def test_packages_and_pricing_sections(self):

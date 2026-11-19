@@ -47,10 +47,16 @@ _SECTION_SPECS = (
         ("home",),
     ),
     MarketingSection(
+        "home.promo",
+        "Home Page Product Promotion",
+        "promotion",
+        ("home",),
+    ),
+    MarketingSection(
         "product.solo",
         "Solo",
         "product",
-        ("home", "packages", "pricing"),
+        ("packages", "pricing"),
     ),
     MarketingSection(
         "product.peachpos",
