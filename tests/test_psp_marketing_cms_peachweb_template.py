@@ -101,18 +101,47 @@ class PeachWebTemplateTests(unittest.TestCase):
         self.assertNotIn("disabled", button.group(0))
         self.assertIn("Save Draft", self.source)
 
-    def test_upload_controls_remain_disabled(self):
+    def test_upload_form_uses_multipart_encoding(self):
+        self.assertIn(
+            'enctype="multipart/form-data"',
+            self.source,
+        )
+        self.assertIn(
+            "url_for('master_admin_website_peachweb_save_draft')",
+            self.source,
+        )
+        self.assertIn(
+            'name="security_csrf_token"',
+            self.source,
+        )
+        self.assertIn(
+            'name="expected_draft_revision_id"',
+            self.source,
+        )
+
+    def test_picture_and_description_controls_enabled(self):
         import re
 
         for field in ("showcase_image", "image_alt"):
-            control = re.search(
+            matches = re.findall(
                 rf'<input\b[^>]*name="{field}"[^>]*>',
                 self.source,
                 re.S,
             )
-            self.assertIsNotNone(control)
-            self.assertIn("disabled", control.group(0))
+            self.assertEqual(len(matches), 1)
+            self.assertNotIn("disabled", matches[0])
 
+        self.assertIn(
+            'accept="image/jpeg,image/png"',
+            self.source,
+        )
+        self.assertIn("up to 5 MB", self.source)
+        self.assertIn(
+            'maxlength="180"',
+            self.source,
+        )
+
+    def test_browser_cannot_supply_image_references(self):
         self.assertNotIn(
             'name="image_public_id"',
             self.source,
@@ -122,6 +151,10 @@ class PeachWebTemplateTests(unittest.TestCase):
             self.source,
         )
         self.assertNotIn("|safe", self.source)
+        self.assertEqual(
+            self.source.count('type="submit"'),
+            1,
+        )
 
 
 if __name__ == "__main__":

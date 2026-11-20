@@ -83,14 +83,15 @@
         <h2>Edit PeachWeb Showcase</h2>
 
         <p>
-            Edit the text beneath the picture and select
-            Save Draft. Your changes remain private until
-            explicitly published. Picture uploading and
-            image-description editing will be enabled next.
+            Choose an optional JPG or PNG picture,
+            enter its image description, and edit the
+            caption. Save Draft stores your changes
+            privately without publishing.
         </p>
 
         <form
             method="POST"
+            enctype="multipart/form-data"
             action="{{ url_for('master_admin_website_peachweb_save_draft') }}"
         >
 
@@ -117,12 +118,11 @@
                 name="showcase_image"
                 type="file"
                 accept="image/jpeg,image/png"
-                disabled
                 style="display: block; margin-top: 8px;"
             >
 
             <p style="font-size: 0.9em;">
-                JPG or PNG. Upload is not yet enabled.
+                Optional JPG or PNG picture, up to 5 MB. An image description is required when uploading a new picture.
             </p>
 
         </div>
@@ -144,7 +144,6 @@
                 type="text"
                 maxlength="180"
                 value="{{ showcase.image_alt }}"
-                disabled
                 style="display: block;
                        width: 100%;
                        box-sizing: border-box;
