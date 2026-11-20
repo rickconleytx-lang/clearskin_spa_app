@@ -211,14 +211,14 @@ class PeachWebDraftTests(unittest.TestCase):
 
         conn.cursor.assert_not_called()
 
-    def test_peachbook_still_requires_own_validator(self):
+    def test_peachbook_rejects_peachweb_image_namespace(self):
         conn, _ = fake_connection([])
 
-        with self.assertRaises(MarketingCMSSectionError):
+        with self.assertRaises(MarketingContentError):
             save_section_draft(
                 conn,
                 section_key="home.peachbook",
-                content=valid_content(),
+                content=content_with_image(),
                 actor_id=1,
                 expected_draft_revision_id=None,
             )
