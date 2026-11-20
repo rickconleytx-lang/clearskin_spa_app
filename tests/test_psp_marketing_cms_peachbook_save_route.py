@@ -272,7 +272,7 @@ class PeachBookSaveRouteTests(unittest.TestCase):
 
 class PeachBookCaptionStageGuards(unittest.TestCase):
 
-    def test_picture_upload_guard_precedes_database_access(self):
+    def test_peachbook_upload_uses_protected_cloudinary_path(self):
         import ast
         from pathlib import Path
 
@@ -288,13 +288,21 @@ class PeachBookCaptionStageGuards(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         body = ast.get_source_segment(source, matches[0])
 
+        self.assertIn("CLOUDINARY_CONFIGURED", body)
+        self.assertIn("FOR UPDATE", body)
+        self.assertIn("upload_showcase_image(", body)
+        self.assertIn('"peachbook",', body)
         self.assertIn(
-            "if has_upload:\n        abort(400)",
+            'section_key="home.peachbook"',
             body,
         )
         self.assertLess(
-            body.index("if has_upload:\n        abort(400)"),
-            body.index("conn = get_db_connection()"),
+            body.index("FOR UPDATE"),
+            body.index("upload_showcase_image("),
+        )
+        self.assertNotIn(
+            "if has_upload:\n        abort(400)",
+            body,
         )
 
     def test_peachbook_stays_separate_from_peachweb(self):

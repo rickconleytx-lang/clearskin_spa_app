@@ -65248,11 +65248,6 @@ def master_admin_website_peachbook_save_draft():
         and bool(getattr(uploaded_file, "filename", ""))
     )
 
-    # Picture uploading is not enabled at this stage.
-    # Reject uploaded files before opening a database connection.
-    if has_upload:
-        abort(400)
-
     if has_upload and "image_alt" not in request.form:
         abort(400)
 

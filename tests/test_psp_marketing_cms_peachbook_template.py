@@ -49,9 +49,9 @@ class PeachBookTemplateTests(unittest.TestCase):
         )
         self.assertIn("white-space: pre-line", self.source)
 
-    def test_caption_enabled_and_picture_upload_disabled(self):
+    def test_showcase_fields_enabled_for_draft_saving(self):
         for field, element, should_be_disabled in (
-            ("showcase_image", "input", True),
+            ("showcase_image", "input", False),
             ("image_alt", "input", False),
             ("caption", "textarea", False),
         ):
