@@ -1305,6 +1305,16 @@
     <div class="container product-row">
 
         <div class="product-visual">
+            {% if cms_peachweb_showcase is defined and (cms_peachweb_showcase.image_url or cms_peachweb_showcase.caption) %}
+                <figure style="margin: 0; width: 100%; text-align: center;">
+                    {% if cms_peachweb_showcase.image_url %}
+                        <img
+                            src="{{ cms_peachweb_showcase.image_url }}"
+                            alt="{{ cms_peachweb_showcase.image_alt }}"
+                            style="display: block; width: 100%; max-width: 100%; height: auto; max-height: 340px; object-fit: contain; border-radius: 12px;"
+                        >
+                    {% else %}
+
             <div class="mock-window">
                 <div class="mock-bar">
                     <span class="mock-dot"></span>
@@ -1322,6 +1332,33 @@
                     </div>
                 </div>
             </div>
+                    {% endif %}
+                    {% if cms_peachweb_showcase.caption %}
+                        <figcaption style="margin-top: 14px; white-space: pre-line; overflow-wrap: anywhere; line-height: 1.5;">
+                            {{ cms_peachweb_showcase.caption }}
+                        </figcaption>
+                    {% endif %}
+                </figure>
+            {% else %}
+
+            <div class="mock-window">
+                <div class="mock-bar">
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                </div>
+
+                <div class="mock-content">
+                    <div class="mock-title"></div>
+
+                    <div class="mock-row">
+                        <div class="mock-card"></div>
+                        <div class="mock-card"></div>
+                        <div class="mock-card"></div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <div class="product-copy">
@@ -1359,6 +1396,16 @@
     <div class="container product-row reverse">
 
         <div class="product-visual green">
+            {% if cms_peachbook_showcase is defined and (cms_peachbook_showcase.image_url or cms_peachbook_showcase.caption) %}
+                <figure style="margin: 0; width: 100%; text-align: center;">
+                    {% if cms_peachbook_showcase.image_url %}
+                        <img
+                            src="{{ cms_peachbook_showcase.image_url }}"
+                            alt="{{ cms_peachbook_showcase.image_alt }}"
+                            style="display: block; width: 100%; max-width: 100%; height: auto; max-height: 340px; object-fit: contain; border-radius: 12px;"
+                        >
+                    {% else %}
+
             <div class="mock-window">
                 <div class="mock-bar">
                     <span class="mock-dot"></span>
@@ -1376,6 +1423,33 @@
                     </div>
                 </div>
             </div>
+                    {% endif %}
+                    {% if cms_peachbook_showcase.caption %}
+                        <figcaption style="margin-top: 14px; white-space: pre-line; overflow-wrap: anywhere; line-height: 1.5;">
+                            {{ cms_peachbook_showcase.caption }}
+                        </figcaption>
+                    {% endif %}
+                </figure>
+            {% else %}
+
+            <div class="mock-window">
+                <div class="mock-bar">
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                </div>
+
+                <div class="mock-content">
+                    <div class="mock-title" style="width:62%;"></div>
+
+                    <div class="mock-row">
+                        <div class="mock-card" style="min-height:130px;"></div>
+                        <div class="mock-card" style="min-height:130px;"></div>
+                        <div class="mock-card" style="min-height:130px;"></div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <div class="product-copy">
