@@ -64919,6 +64919,64 @@ def master_admin_website_promotion_editor():
 
 
 @app.route(
+    "/master-admin/website/home/peachweb",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachweb_editor():
+    """Display the private PeachWeb showcase editor."""
+    from services.psp_marketing_cms_content import (
+        normalize_home_peachweb_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key="home.peachweb",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        showcase = normalize_home_peachweb_content(
+            state["draft_content"]
+        )["showcase"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        showcase = normalize_home_peachweb_content(
+            state["published_content"]
+        )["showcase"]
+        content_source = "published content"
+
+    else:
+        showcase = {
+            "image_public_id": "",
+            "image_url": "",
+            "image_alt": "",
+            "caption": "",
+        }
+        content_source = "existing website illustration"
+
+    return render_template(
+        "master_admin_website_peachweb.html",
+        showcase=showcase,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
     "/master-admin/website",
     methods=["GET"],
 )
