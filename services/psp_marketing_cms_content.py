@@ -324,3 +324,133 @@ def normalize_home_peachweb_content(payload):
         )
 
     return {"showcase": normalized}
+
+
+def normalize_home_peachbook_content(payload):
+    """Validate an independent PeachBook showcase snapshot.
+
+    No image is required while editing the initial draft.
+    Cloudinary assets are identified by immutable public IDs.
+    The caption preserves intentional newline characters.
+    """
+    import re
+    from urllib.parse import urlsplit
+
+    if not isinstance(payload, dict) or set(payload) != {"showcase"}:
+        raise MarketingContentError(
+            "PeachBook content must contain only showcase."
+        )
+
+    showcase = payload["showcase"]
+
+    if not isinstance(showcase, dict):
+        raise MarketingContentError(
+            "PeachBook showcase must be an object."
+        )
+
+    fields = {
+        "image_public_id",
+        "image_url",
+        "image_alt",
+        "caption",
+    }
+
+    if set(showcase) != fields:
+        raise MarketingContentError(
+            "PeachBook showcase contains missing or unsupported fields."
+        )
+
+    normalized = {}
+
+    for field in fields:
+        value = showcase[field]
+
+        if not isinstance(value, str):
+            raise MarketingContentError(
+                f"{field} must be text."
+            )
+
+        value = value.replace("\r\n", "\n").replace("\r", "\n")
+        value = value.strip()
+
+        maximum = {
+            "image_public_id": 180,
+            "image_url": 600,
+            "image_alt": 180,
+            "caption": 350,
+        }[field]
+
+        if len(value) > maximum:
+            raise MarketingContentError(
+                f"{field} exceeds its character limit."
+            )
+
+        if any(
+            ord(c) < 32 and not (field == "caption" and c == "\n")
+            for c in value
+        ) or "\x7f" in value:
+            raise MarketingContentError(
+                f"{field} contains control characters."
+            )
+
+        if field in {"image_alt", "caption"}:
+            if "<" in value or ">" in value:
+                raise MarketingContentError(
+                    f"{field} cannot contain HTML markup."
+                )
+
+        normalized[field] = value
+
+    public_id = normalized["image_public_id"]
+    url = normalized["image_url"]
+    alt = normalized["image_alt"]
+
+    if bool(public_id) != bool(url):
+        raise MarketingContentError(
+            "The PeachBook image ID and URL must be provided together."
+        )
+
+    if not public_id:
+        if alt:
+            raise MarketingContentError(
+                "Image description requires an uploaded picture."
+            )
+        return {"showcase": normalized}
+
+    if not alt:
+        raise MarketingContentError(
+            "An uploaded PeachBook picture requires alt text."
+        )
+
+    expected_id = (
+        r"peach-suite-pro/marketing-cms/showcases/"
+        r"peachbook/[0-9a-f]{32}"
+    )
+
+    if re.fullmatch(expected_id, public_id) is None:
+        raise MarketingContentError(
+            "Invalid PeachBook image identifier."
+        )
+
+    parsed = urlsplit(url)
+
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "res.cloudinary.com"
+        or "/image/upload/" not in parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise MarketingContentError(
+            "Invalid PeachBook image URL."
+        )
+
+    if not any(
+        parsed.path.endswith(f"/{public_id}.{ext}")
+        for ext in ("png", "jpg")
+    ):
+        raise MarketingContentError(
+            "PeachBook image URL does not match its asset ID."
+        )
+
+    return {"showcase": normalized}
