@@ -66,28 +66,62 @@ class PeachWebTemplateTests(unittest.TestCase):
         ):
             self.assertIn(name, self.source)
 
-    def test_unimplemented_actions_are_disabled(self):
-        self.assertNotIn("<form", self.source)
-        self.assertNotIn(
-            'method="POST"',
-            self.source,
-        )
-        self.assertNotIn(
-            "upload_showcase_image(",
+    def test_save_form_connects_to_private_route(self):
+        self.assertIn('method="POST"', self.source)
+        self.assertIn(
+            "url_for('master_admin_website_peachweb_save_draft')",
             self.source,
         )
         self.assertIn(
-            "Save Draft — Coming Next",
+            'name="security_csrf_token"',
             self.source,
         )
-        self.assertGreaterEqual(
-            self.source.count("disabled"),
-            4,
+        self.assertIn(
+            'name="expected_draft_revision_id"',
+            self.source,
+        )
+
+    def test_caption_and_save_button_are_enabled(self):
+        import re
+
+        caption = re.search(
+            r'<textarea\b[^>]*name="caption"[^>]*>',
+            self.source,
+            re.S,
+        )
+        self.assertIsNotNone(caption)
+        self.assertNotIn("disabled", caption.group(0))
+
+        button = re.search(
+            r'<button\b[^>]*type="submit"[^>]*>',
+            self.source,
+            re.S,
+        )
+        self.assertIsNotNone(button)
+        self.assertNotIn("disabled", button.group(0))
+        self.assertIn("Save Draft", self.source)
+
+    def test_upload_controls_remain_disabled(self):
+        import re
+
+        for field in ("showcase_image", "image_alt"):
+            control = re.search(
+                rf'<input\b[^>]*name="{field}"[^>]*>',
+                self.source,
+                re.S,
+            )
+            self.assertIsNotNone(control)
+            self.assertIn("disabled", control.group(0))
+
+        self.assertNotIn(
+            'name="image_public_id"',
+            self.source,
         )
         self.assertNotIn(
-            "|safe",
+            'name="image_url"',
             self.source,
         )
+        self.assertNotIn("|safe", self.source)
 
 
 if __name__ == "__main__":

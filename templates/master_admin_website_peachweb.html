@@ -83,10 +83,28 @@
         <h2>Edit PeachWeb Showcase</h2>
 
         <p>
-            The editing fields are shown for layout review.
-            Upload and Save Draft will be enabled after the
-            protected server-side actions are implemented.
+            Edit the text beneath the picture and select
+            Save Draft. Your changes remain private until
+            explicitly published. Picture uploading and
+            image-description editing will be enabled next.
         </p>
+
+        <form
+            method="POST"
+            action="{{ url_for('master_admin_website_peachweb_save_draft') }}"
+        >
+
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <input
+                type="hidden"
+                name="expected_draft_revision_id"
+                value="{{ draft_revision_id if draft_revision_id is not none else '' }}"
+            >
 
         <div style="margin-top: 20px;">
 
@@ -151,7 +169,6 @@
                 name="caption"
                 maxlength="350"
                 rows="5"
-                disabled
                 style="display: block;
                        width: 100%;
                        box-sizing: border-box;
@@ -163,14 +180,15 @@
         <div style="margin-top: 24px;">
 
             <button
-                type="button"
+                type="submit"
                 class="btn"
-                disabled
             >
-                Save Draft — Coming Next
+                Save Draft
             </button>
 
         </div>
+
+        </form>
 
     </div>
 
