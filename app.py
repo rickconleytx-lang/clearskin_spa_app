@@ -64919,6 +64919,137 @@ def master_admin_website_promotion_editor():
 
 
 @app.route(
+    "/master-admin/website/home/peachweb/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachweb_save_draft():
+    """Save a private PeachWeb caption, retaining trusted image data."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+        normalize_home_peachweb_content,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        load_section_state,
+        save_section_draft,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    allowed_fields = {
+        "security_csrf_token",
+        "expected_draft_revision_id",
+        "caption",
+    }
+    if set(request.form.keys()) - allowed_fields:
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor)
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            state = load_section_state(
+                conn,
+                section_key="home.peachweb",
+            )
+
+            if state["draft_content"] is not None:
+                stored_content = state["draft_content"]
+            else:
+                stored_content = state["published_content"]
+
+            if stored_content is not None:
+                trusted_showcase = normalize_home_peachweb_content(
+                    stored_content
+                )["showcase"]
+            else:
+                trusted_showcase = {
+                    "image_public_id": "",
+                    "image_url": "",
+                    "image_alt": "",
+                    "caption": "",
+                }
+
+            content = {
+                "showcase": {
+                    **trusted_showcase,
+                    "caption": request.form.get("caption", ""),
+                }
+            }
+
+            result = save_section_draft(
+                conn,
+                section_key="home.peachweb",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+
+        except MarketingCMSConflict:
+            flash(
+                "A newer PeachWeb Showcase draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_peachweb_editor")
+            )
+
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_peachweb_editor")
+            )
+
+    finally:
+        conn.close()
+
+    flash(
+        "PeachWeb Showcase draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_peachweb_editor")
+    )
+
+
+@app.route(
     "/master-admin/website/home/peachweb",
     methods=["GET"],
 )
