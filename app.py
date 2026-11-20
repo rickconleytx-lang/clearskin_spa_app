@@ -66186,6 +66186,84 @@ def master_admin_website_home_preview():
     return response
 
 
+def _master_admin_website_showcase_preview(showcase):
+    """Render one private showcase draft in the real homepage layout."""
+    from flask import make_response
+    from services.psp_marketing_cms_showcase_preview import (
+        build_showcase_preview_context,
+    )
+
+    if showcase not in ("peachweb", "peachbook"):
+        abort(404)
+
+    conn = get_db_connection()
+
+    try:
+        context = build_showcase_preview_context(
+            conn,
+            showcase=showcase,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if context is None:
+        flash(
+            f"Save a {showcase} showcase draft before previewing.",
+            "error",
+        )
+        editor = (
+            "master_admin_website_peachweb_editor"
+            if showcase == "peachweb"
+            else "master_admin_website_peachbook_editor"
+        )
+        return redirect(url_for(editor))
+
+    response = make_response(
+        render_template(
+            "public_site/psp_home.html",
+            **context,
+            contact_csrf_token=_public_security_csrf_token(
+                "public_contact"
+            ),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/peachweb/preview",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachweb_preview():
+    """Show only the private PeachWeb draft."""
+    return _master_admin_website_showcase_preview("peachweb")
+
+
+@app.route(
+    "/master-admin/website/home/peachbook/preview",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachbook_preview():
+    """Show only the private PeachBook draft."""
+    return _master_admin_website_showcase_preview("peachbook")
+
+
 @app.route("/master-admin")
 @login_required
 @master_admin_required
