@@ -64932,8 +64932,16 @@ def master_admin_website_peachweb_save_draft():
     )
     from services.psp_marketing_cms_service import (
         MarketingCMSConflict,
+        MarketingCMSConfigurationError,
+        MarketingCMSNotFound,
         load_section_state,
         save_section_draft,
+    )
+    from services.psp_marketing_cms_cloudinary import (
+        upload_showcase_image,
+    )
+    from services.psp_marketing_cms_media import (
+        MarketingCMSImageError,
     )
 
     if not _security_form_csrf_valid(
@@ -64945,8 +64953,25 @@ def master_admin_website_peachweb_save_draft():
         "security_csrf_token",
         "expected_draft_revision_id",
         "caption",
+        "image_alt",
     }
     if set(request.form.keys()) - allowed_fields:
+        abort(400)
+
+    if set(request.files.keys()) - {"showcase_image"}:
+        abort(400)
+
+    uploaded_file = (
+        request.files["showcase_image"]
+        if "showcase_image" in request.files
+        else None
+    )
+    has_upload = (
+        uploaded_file is not None
+        and bool(getattr(uploaded_file, "filename", ""))
+    )
+
+    if has_upload and "image_alt" not in request.form:
         abort(400)
 
     raw_actor = session.get("user_id")
@@ -64977,14 +65002,64 @@ def master_admin_website_peachweb_save_draft():
     else:
         expected_revision = None
 
+    if has_upload and not CLOUDINARY_CONFIGURED:
+        flash(
+            "Marketing picture storage is not configured. "
+            "No draft was saved.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_peachweb_editor")
+        )
+
     conn = get_db_connection()
+    draft_saved = False
 
     try:
         try:
+            if has_upload:
+                # Hold this section's row lock across the upload and
+                # the subsequent draft save. Reject stale requests
+                # before any external Cloudinary operation.
+                if conn.autocommit:
+                    raise MarketingCMSConfigurationError(
+                        "Image saving requires a database transaction."
+                    )
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT draft_revision_id
+                        FROM psp_marketing_page_state
+                        WHERE page_key = %s
+                        FOR UPDATE
+                        """,
+                        ("home.peachweb",),
+                    )
+                    locked_row = cur.fetchone()
+
+                if locked_row is None:
+                    raise MarketingCMSNotFound(
+                        "PeachWeb Showcase state is missing."
+                    )
+
+                if locked_row[0] != expected_revision:
+                    raise MarketingCMSConflict(
+                        "This PeachWeb draft has changed."
+                    )
+
             state = load_section_state(
                 conn,
                 section_key="home.peachweb",
             )
+
+            if (
+                has_upload
+                and state["draft_revision_id"] != expected_revision
+            ):
+                raise MarketingCMSConflict(
+                    "This PeachWeb draft has changed."
+                )
 
             if state["draft_content"] is not None:
                 stored_content = state["draft_content"]
@@ -65003,12 +65078,78 @@ def master_admin_website_peachweb_save_draft():
                     "caption": "",
                 }
 
-            content = {
-                "showcase": {
-                    **trusted_showcase,
-                    "caption": request.form.get("caption", ""),
-                }
+            candidate = {
+                **trusted_showcase,
+                "caption": request.form.get("caption", ""),
             }
+
+            if has_upload:
+                # Validation-only reference. It is never uploaded,
+                # saved, or returned to the browser.
+                validation_id = (
+                    "peach-suite-pro/marketing-cms/showcases/"
+                    "peachweb/" + "0" * 32
+                )
+
+                candidate.update({
+                    "image_public_id": validation_id,
+                    "image_url": (
+                        "https://res.cloudinary.com/validation/"
+                        "image/upload/v1/"
+                        f"{validation_id}.jpg"
+                    ),
+                    "image_alt": request.form.get(
+                        "image_alt", ""
+                    ),
+                })
+
+            elif "image_alt" in request.form:
+                # Editing the existing image description does not
+                # permit changing its stored image reference.
+                candidate["image_alt"] = request.form["image_alt"]
+
+            content = normalize_home_peachweb_content({
+                "showcase": candidate,
+            })
+
+            if has_upload:
+                try:
+                    asset = upload_showcase_image(
+                        uploaded_file,
+                        "peachweb",
+                    )
+                except MarketingCMSImageError as exc:
+                    flash(str(exc), "error")
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachweb_editor"
+                        )
+                    )
+                except Exception:
+                    import logging
+                    logging.exception(
+                        "PeachWeb marketing picture upload failed"
+                    )
+                    flash(
+                        "Picture upload failed. "
+                        "No draft was saved. Please try again.",
+                        "error",
+                    )
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachweb_editor"
+                        )
+                    )
+
+                # Only the storage service supplies these values.
+                content["showcase"]["image_public_id"] = (
+                    asset["public_id"]
+                )
+                content["showcase"]["image_url"] = (
+                    asset["secure_url"]
+                )
+
+                content = normalize_home_peachweb_content(content)
 
             result = save_section_draft(
                 conn,
@@ -65017,6 +65158,7 @@ def master_admin_website_peachweb_save_draft():
                 actor_id=actor_id,
                 expected_draft_revision_id=expected_revision,
             )
+            draft_saved = True
 
         except MarketingCMSConflict:
             flash(
@@ -65035,7 +65177,11 @@ def master_admin_website_peachweb_save_draft():
             )
 
     finally:
-        conn.close()
+        try:
+            if not draft_saved:
+                conn.rollback()
+        finally:
+            conn.close()
 
     flash(
         "PeachWeb Showcase draft saved successfully. "

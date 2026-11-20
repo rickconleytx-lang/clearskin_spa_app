@@ -255,8 +255,11 @@ class PeachWebSaveRouteTests(unittest.TestCase):
             and "POST" in item
             for item in self.decorators
         ))
-        self.assertNotIn(
+        self.assertIn(
             "upload_showcase_image(", self.route_source
+        )
+        self.assertIn(
+            "if has_upload:", self.route_source
         )
         self.assertNotIn(
             "publish_section", self.route_source
