@@ -65196,6 +65196,288 @@ def master_admin_website_peachweb_save_draft():
 
 
 @app.route(
+    "/master-admin/website/home/peachbook/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachbook_save_draft():
+    """Save a private PeachBook caption, retaining trusted image data."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+        normalize_home_peachbook_content,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSConfigurationError,
+        MarketingCMSNotFound,
+        load_section_state,
+        save_section_draft,
+    )
+    from services.psp_marketing_cms_cloudinary import (
+        upload_showcase_image,
+    )
+    from services.psp_marketing_cms_media import (
+        MarketingCMSImageError,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    allowed_fields = {
+        "security_csrf_token",
+        "expected_draft_revision_id",
+        "caption",
+        "image_alt",
+    }
+    if set(request.form.keys()) - allowed_fields:
+        abort(400)
+
+    if set(request.files.keys()) - {"showcase_image"}:
+        abort(400)
+
+    uploaded_file = (
+        request.files["showcase_image"]
+        if "showcase_image" in request.files
+        else None
+    )
+    has_upload = (
+        uploaded_file is not None
+        and bool(getattr(uploaded_file, "filename", ""))
+    )
+
+    # Picture uploading is not enabled at this stage.
+    # Reject uploaded files before opening a database connection.
+    if has_upload:
+        abort(400)
+
+    if has_upload and "image_alt" not in request.form:
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor)
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    if has_upload and not CLOUDINARY_CONFIGURED:
+        flash(
+            "Marketing picture storage is not configured. "
+            "No draft was saved.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_peachbook_editor")
+        )
+
+    conn = get_db_connection()
+    draft_saved = False
+
+    try:
+        try:
+            if has_upload:
+                # Hold this section's row lock across the upload and
+                # the subsequent draft save. Reject stale requests
+                # before any external Cloudinary operation.
+                if conn.autocommit:
+                    raise MarketingCMSConfigurationError(
+                        "Image saving requires a database transaction."
+                    )
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT draft_revision_id
+                        FROM psp_marketing_page_state
+                        WHERE page_key = %s
+                        FOR UPDATE
+                        """,
+                        ("home.peachbook",),
+                    )
+                    locked_row = cur.fetchone()
+
+                if locked_row is None:
+                    raise MarketingCMSNotFound(
+                        "PeachBook Showcase state is missing."
+                    )
+
+                if locked_row[0] != expected_revision:
+                    raise MarketingCMSConflict(
+                        "This PeachBook draft has changed."
+                    )
+
+            state = load_section_state(
+                conn,
+                section_key="home.peachbook",
+            )
+
+            if (
+                has_upload
+                and state["draft_revision_id"] != expected_revision
+            ):
+                raise MarketingCMSConflict(
+                    "This PeachBook draft has changed."
+                )
+
+            if state["draft_content"] is not None:
+                stored_content = state["draft_content"]
+            else:
+                stored_content = state["published_content"]
+
+            if stored_content is not None:
+                trusted_showcase = normalize_home_peachbook_content(
+                    stored_content
+                )["showcase"]
+            else:
+                trusted_showcase = {
+                    "image_public_id": "",
+                    "image_url": "",
+                    "image_alt": "",
+                    "caption": "",
+                }
+
+            candidate = {
+                **trusted_showcase,
+                "caption": request.form.get("caption", ""),
+            }
+
+            if has_upload:
+                # Validation-only reference. It is never uploaded,
+                # saved, or returned to the browser.
+                validation_id = (
+                    "peach-suite-pro/marketing-cms/showcases/"
+                    "peachbook/" + "0" * 32
+                )
+
+                candidate.update({
+                    "image_public_id": validation_id,
+                    "image_url": (
+                        "https://res.cloudinary.com/validation/"
+                        "image/upload/v1/"
+                        f"{validation_id}.jpg"
+                    ),
+                    "image_alt": request.form.get(
+                        "image_alt", ""
+                    ),
+                })
+
+            elif "image_alt" in request.form:
+                # Editing the existing image description does not
+                # permit changing its stored image reference.
+                candidate["image_alt"] = request.form["image_alt"]
+
+            content = normalize_home_peachbook_content({
+                "showcase": candidate,
+            })
+
+            if has_upload:
+                try:
+                    asset = upload_showcase_image(
+                        uploaded_file,
+                        "peachbook",
+                    )
+                except MarketingCMSImageError as exc:
+                    flash(str(exc), "error")
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachbook_editor"
+                        )
+                    )
+                except Exception:
+                    import logging
+                    logging.exception(
+                        "PeachBook marketing picture upload failed"
+                    )
+                    flash(
+                        "Picture upload failed. "
+                        "No draft was saved. Please try again.",
+                        "error",
+                    )
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachbook_editor"
+                        )
+                    )
+
+                # Only the storage service supplies these values.
+                content["showcase"]["image_public_id"] = (
+                    asset["public_id"]
+                )
+                content["showcase"]["image_url"] = (
+                    asset["secure_url"]
+                )
+
+                content = normalize_home_peachbook_content(content)
+
+            result = save_section_draft(
+                conn,
+                section_key="home.peachbook",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+            draft_saved = True
+
+        except MarketingCMSConflict:
+            flash(
+                "A newer PeachBook Showcase draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_peachbook_editor")
+            )
+
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_peachbook_editor")
+            )
+
+    finally:
+        try:
+            if not draft_saved:
+                conn.rollback()
+        finally:
+            conn.close()
+
+    flash(
+        "PeachBook Showcase draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_peachbook_editor")
+    )
+
+
+@app.route(
     "/master-admin/website/home/peachbook",
     methods=["GET"],
 )

@@ -49,11 +49,11 @@ class PeachBookTemplateTests(unittest.TestCase):
         )
         self.assertIn("white-space: pre-line", self.source)
 
-    def test_controls_present_but_disabled(self):
-        for field, element in (
-            ("showcase_image", "input"),
-            ("image_alt", "input"),
-            ("caption", "textarea"),
+    def test_caption_enabled_and_picture_upload_disabled(self):
+        for field, element, should_be_disabled in (
+            ("showcase_image", "input", True),
+            ("image_alt", "input", False),
+            ("caption", "textarea", False),
         ):
             match = re.search(
                 rf'<{element}\b[^>]*name="{field}"[^>]*>',
@@ -61,24 +61,27 @@ class PeachBookTemplateTests(unittest.TestCase):
                 re.S,
             )
             self.assertIsNotNone(match, field)
-            self.assertIn("disabled", match.group(0))
+            self.assertEqual(
+                bool(re.search(r"\bdisabled\b", match.group(0))),
+                should_be_disabled,
+                field,
+            )
 
+        self.assertIn("Save Draft", self.source)
+        self.assertNotIn("Save Draft — Coming Next", self.source)
+
+    def test_protected_form_without_browser_image_references(self):
+        self.assertEqual(self.source.count("<form"), 1)
+        self.assertEqual(self.source.count("</form>"), 1)
+        self.assertIn('method="POST"', self.source)
+        self.assertIn('name="security_csrf_token"', self.source)
+        self.assertIn('name="expected_draft_revision_id"', self.source)
         self.assertIn(
-            "Save Draft — Coming Next",
+            "url_for('master_admin_website_peachbook_save_draft')",
             self.source,
         )
-
-    def test_no_active_save_or_browser_image_references(self):
-        self.assertNotIn("<form", self.source)
-        self.assertNotIn('method="POST"', self.source)
-        self.assertNotIn(
-            'name="image_public_id"',
-            self.source,
-        )
-        self.assertNotIn(
-            'name="image_url"',
-            self.source,
-        )
+        self.assertNotIn('name="image_public_id"', self.source)
+        self.assertNotIn('name="image_url"', self.source)
         self.assertNotIn("|safe", self.source)
 
 
