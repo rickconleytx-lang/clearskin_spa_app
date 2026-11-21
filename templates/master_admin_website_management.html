@@ -204,11 +204,60 @@
     </div>
 
     <div style="margin-top: 28px;">
-        <h2>Additional Website Pages</h2>
+
+        <h2>Subscription Packages &amp; Pricing</h2>
+
         <p>
-            Subscription Packages and Pricing will be added
-            after the Home Page editor is verified.
+            Edit the introduction for each page independently.
+            Save Draft does not change the public website.
         </p>
+
+        <div style="
+            border: 1px solid #bbb;
+            border-radius: 12px;
+            padding: 22px;
+            margin-top: 20px;
+        ">
+
+            <h3>Subscription Packages Introduction</h3>
+
+            <p>
+                Edit the promotional heading and paragraph
+                on the Subscription Packages page.
+            </p>
+
+            <a
+                class="btn"
+                href="{{ url_for('master_admin_website_intro_editor', surface='packages') }}"
+            >
+                Edit Subscription Packages Introduction
+            </a>
+
+        </div>
+
+        <div style="
+            border: 1px solid #bbb;
+            border-radius: 12px;
+            padding: 22px;
+            margin-top: 20px;
+        ">
+
+            <h3>Pricing Introduction</h3>
+
+            <p>
+                Edit the independent promotional heading
+                and paragraph on the Pricing page.
+            </p>
+
+            <a
+                class="btn"
+                href="{{ url_for('master_admin_website_intro_editor', surface='pricing') }}"
+            >
+                Edit Pricing Introduction
+            </a>
+
+        </div>
+
     </div>
 
 </div>
