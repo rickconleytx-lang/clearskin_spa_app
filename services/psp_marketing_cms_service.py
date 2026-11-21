@@ -16,6 +16,9 @@ from services.psp_marketing_cms_content import (
     normalize_home_peachweb_content,
     normalize_home_peachbook_content,
 )
+from services.psp_marketing_cms_page_intro import (
+    normalize_page_intro_content,
+)
 from services.psp_marketing_cms_sections import (
     MarketingCMSSectionError,
     get_section_spec,
@@ -143,6 +146,11 @@ def save_section_draft(
         normalized = normalize_home_peachweb_content(content)
     elif section.key == "home.peachbook":
         normalized = normalize_home_peachbook_content(content)
+    elif section.key in ("packages.intro", "pricing.intro"):
+        normalized = normalize_page_intro_content(
+            section.key,
+            content,
+        )
     else:
         raise MarketingCMSSectionError(
             "Draft saving is not yet supported for this section."
