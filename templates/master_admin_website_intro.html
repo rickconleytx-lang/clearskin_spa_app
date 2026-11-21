@@ -106,6 +106,13 @@
 
         </form>
 
+        <div style="margin-top: 18px;">
+            <a class="btn"
+               href="{{ url_for('master_admin_website_intro_history', surface=surface) }}">
+                View Publication History
+            </a>
+        </div>
+
         {% if draft_revision_id is not none %}
         <div style="margin-top: 18px;">
             <a

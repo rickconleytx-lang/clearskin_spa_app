@@ -65589,6 +65589,62 @@ def master_admin_website_peachweb_editor():
 
 
 @app.route(
+    "/master-admin/website/<surface>/intro/history",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_history(surface):
+    """Privately display one introduction's revision history."""
+    from flask import make_response
+    from services.psp_marketing_cms_intro_history import (
+        load_intro_history,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    section_key = f"{surface}.intro"
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    conn = get_db_connection()
+
+    try:
+        history = load_intro_history(
+            conn,
+            section_key=section_key,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(
+        render_template(
+            "master_admin_website_intro_history.html",
+            surface=surface,
+            page_label=page_label,
+            history=history,
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
     "/master-admin/website/<surface>/intro/review",
     methods=["GET"],
 )
