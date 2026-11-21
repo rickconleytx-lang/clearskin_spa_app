@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a class="btn"
+       href="{{ url_for('master_admin_website_intro_history', surface=surface) }}">
+        Back to Revision History
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        Review {{ page_label }} Introduction Restoration
+    </h1>
+
+    <p>
+        Compare the previously published introduction with
+        the current CMS publication.
+        Reviewing this screen makes no changes.
+    </p>
+
+    <section style="
+        border: 1px solid #bbb;
+        border-radius: 12px;
+        padding: 22px;
+        margin-top: 24px;
+    ">
+        <h2>Revision to Restore</h2>
+
+        <p>
+            <strong>Revision:</strong>
+            {{ target.revision_number }}
+            (ID {{ target.revision_id }})
+        </p>
+
+        <p>
+            <strong>Status:</strong>
+            Previously Published
+        </p>
+
+        <p>
+            <strong>Created:</strong>
+            {{ target.created_at }}
+        </p>
+
+        <div role="note" style="
+            background: #fff5ef;
+            border: 1px solid #e9c3ae;
+            border-radius: 12px;
+            padding: 18px 22px;
+            margin-top: 18px;
+            color: #352e2b;
+        ">
+            <strong style="
+                display: block;
+                margin-bottom: 10px;
+                font-size: 1.15rem;
+            ">{{ target.intro.heading }}</strong>
+
+            <p style="margin: 0; white-space: pre-line;">{{ target.intro.paragraph }}</p>
+        </div>
+    </section>
+
+    <section style="
+        border: 1px solid #bbb;
+        border-radius: 12px;
+        padding: 22px;
+        margin-top: 24px;
+    ">
+        <h2>Currently Published Introduction</h2>
+
+        <p>
+            <strong>Revision:</strong>
+            {{ current.revision_number }}
+            (ID {{ current.revision_id }})
+        </p>
+
+        <div role="note" style="
+            background: #fff5ef;
+            border: 1px solid #e9c3ae;
+            border-radius: 12px;
+            padding: 18px 22px;
+            margin-top: 18px;
+            color: #352e2b;
+        ">
+            <strong style="
+                display: block;
+                margin-bottom: 10px;
+                font-size: 1.15rem;
+            ">{{ current.intro.heading }}</strong>
+
+            <p style="margin: 0; white-space: pre-line;">{{ current.intro.paragraph }}</p>
+        </div>
+    </section>
+
+    <section style="
+        border: 1px solid #bbb;
+        border-radius: 12px;
+        padding: 22px;
+        margin-top: 24px;
+    ">
+        <h2>Restoration Summary</h2>
+
+        <p>
+            Confirming restoration will select
+            Revision {{ target.revision_number }}
+            (ID {{ target.revision_id }})
+            instead of Revision {{ current.revision_number }}
+            (ID {{ current.revision_id }})
+            as the published CMS introduction.
+        </p>
+
+        <p>
+            <strong>Current saved draft:</strong>
+
+            {% if draft_revision_id is not none %}
+                Revision ID {{ draft_revision_id }}
+            {% else %}
+                No saved draft exists.
+            {% endif %}
+        </p>
+
+        <p>
+            The current saved draft will be preserved.
+            Previous revisions and publication activity
+            will remain in history.
+        </p>
+
+        <p>
+            <strong>Important:</strong>
+            Public-page CMS rendering is not yet connected.
+            Restoration currently updates the CMS publication
+            selection only.
+        </p>
+
+        <p>
+            Reviewing this screen does not restore anything.
+            Restoration requires the separate confirmation below.
+        </p>
+    </section>
+
+    <form method="POST"
+          action="{{ url_for('master_admin_website_intro_restore_revision', surface=surface) }}"
+          style="
+              border: 1px solid #bbb;
+              border-radius: 12px;
+              padding: 22px;
+              margin-top: 24px;
+          ">
+
+        <h2>Confirm Restoration</h2>
+
+        <p>
+            This operation will change which previously published
+            {{ page_label }} introduction revision the CMS selects.
+            Your saved draft will not be replaced.
+        </p>
+
+        <input type="hidden"
+               name="security_csrf_token"
+               value="{{ security_csrf_token }}">
+
+        <input type="hidden"
+               name="revision_id"
+               value="{{ target.revision_id }}">
+
+        <input type="hidden"
+               name="expected_published_revision_id"
+               value="{{ current.revision_id }}">
+
+        <label for="cms-intro-restore-confirmation">
+            <strong>Type RESTORE to confirm</strong>
+        </label>
+
+        <input id="cms-intro-restore-confirmation"
+               type="text"
+               name="restore_confirmation"
+               required
+               pattern="RESTORE"
+               maxlength="7"
+               autocomplete="off"
+               spellcheck="false"
+               placeholder="RESTORE"
+               style="
+                   display: block;
+                   width: 100%;
+                   max-width: 450px;
+                   box-sizing: border-box;
+                   padding: 10px;
+                   margin: 12px 0 18px;
+               ">
+
+        <button type="submit" class="btn">
+            Restore Revision {{ target.revision_number }}
+        </button>
+
+    </form>
+
+    <div style="margin-top: 24px;">
+        <a class="btn"
+           href="{{ url_for('master_admin_website_intro_history', surface=surface) }}">
+            Return Without Restoring
+        </a>
+    </div>
+
+</div>
+
+{% endblock %}
