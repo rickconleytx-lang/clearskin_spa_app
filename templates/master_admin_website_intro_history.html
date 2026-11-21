@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width:1000px;margin:0 auto;padding:20px;">
+    <a class="btn" href="{{ url_for('master_admin_website_intro_editor', surface=surface) }}">Back to Introduction Editor</a>
+    <h1 style="margin-top:24px;">{{ page_label }} Introduction — Revision History</h1>
+    <p>Review saved revisions and publication activity. Historical content is read-only.</p>
+
+    <section style="border:1px solid #bbb;border-radius:12px;padding:22px;margin-top:24px;">
+        <h2>Current Introduction State</h2>
+        <p><strong>Current Draft:</strong>
+        {% if history.draft_revision_id is not none %}Revision ID {{ history.draft_revision_id }}{% else %}No draft saved.{% endif %}</p>
+        <p><strong>Currently Published:</strong>
+        {% if history.published_revision_id is not none %}Revision ID {{ history.published_revision_id }}{% else %}No CMS introduction has been published.{% endif %}</p>
+    </section>
+
+    <h2 style="margin-top:32px;">Saved Revisions</h2>
+    {% if history.revisions %}
+        {% for revision in history.revisions %}
+        <section style="border:1px solid #bbb;border-radius:12px;padding:22px;margin-top:16px;">
+            <h3 style="margin-top:0;">Revision {{ revision.revision_number }}</h3>
+            <p><strong>Revision ID:</strong> {{ revision.revision_id }}</p>
+            <p><strong>Status:</strong>
+                {% if revision.is_published %}<strong>Currently Published</strong>
+                {% elif revision.was_published %}Previously Published
+                {% else %}Never Published{% endif %}
+                {% if revision.is_draft %}— Current Draft{% endif %}
+            </p>
+            <p><strong>Created:</strong> {{ revision.created_at }}</p>
+            <p><strong>Created by Administrator ID:</strong> {{ revision.created_by }}</p>
+            {% if revision.change_note %}<p><strong>Change Note:</strong> {{ revision.change_note }}</p>{% endif %}
+
+            <div style="background:#fff5ef;border:1px solid #e9c3ae;border-radius:12px;padding:18px 22px;margin-top:18px;color:#352e2b;">
+                <strong style="display:block;margin-bottom:10px;">{{ revision.intro.heading }}</strong>
+                <p style="margin:0;white-space:pre-line;">{{ revision.intro.paragraph }}</p>
+            </div>
+
+            {% if revision.was_published and not revision.is_published and history.published_revision_id is not none %}
+            <div style="margin-top:18px;">
+                <a class="btn" href="{{ url_for('master_admin_website_intro_restore_review', surface=surface) }}?revision_id={{ revision.revision_id }}">Review Restoration</a>
+            </div>
+            {% elif not revision.was_published %}
+            <p style="margin-top:16px;"><em>This revision was never published and cannot be restored.</em></p>
+            {% endif %}
+        </section>
+        {% endfor %}
+    {% else %}
+        <p>No saved introduction revisions yet.</p>
+    {% endif %}
+
+    <h2 style="margin-top:32px;">Publication Activity</h2>
+    {% if history.events %}
+        {% for event in history.events %}
+        <section style="border:1px solid #bbb;border-radius:12px;padding:18px 22px;margin-top:12px;">
+            <h3 style="margin-top:0;">{{ event.action | capitalize }} — Revision ID {{ event.revision_id }}</h3>
+            <p><strong>Previous Published Revision:</strong>
+                {% if event.previous_revision_id is not none %}{{ event.previous_revision_id }}{% else %}None — first publication{% endif %}
+            </p>
+            <p><strong>Performed:</strong> {{ event.performed_at }}</p>
+            <p><strong>Administrator ID:</strong> {{ event.performed_by }}</p>
+            <p><strong>Publication Event ID:</strong> {{ event.publication_event_id }}</p>
+        </section>
+        {% endfor %}
+    {% else %}
+        <p>No publication events have been recorded.</p>
+    {% endif %}
+
+    <div style="margin-top:28px;">
+        <a class="btn" href="{{ url_for('master_admin_website_management') }}">Back to Website Management</a>
+    </div>
+</div>
+{% endblock %}
