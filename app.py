@@ -65589,6 +65589,197 @@ def master_admin_website_peachweb_editor():
 
 
 @app.route(
+    "/master-admin/website/<surface>/intro",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_editor(surface):
+    """Open the private Packages or Pricing introduction editor."""
+    from services.psp_marketing_cms_page_intro import (
+        normalize_page_intro_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    section_key = f"{surface}.intro"
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key=section_key,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        intro = normalize_page_intro_content(
+            section_key,
+            state["draft_content"],
+        )["intro"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        intro = normalize_page_intro_content(
+            section_key,
+            state["published_content"],
+        )["intro"]
+        content_source = "published content"
+
+    else:
+        intro = {
+            "heading": (
+                "Launch Special — Save 10% on "
+                "Monthly & Yearly Subscriptions!"
+            ),
+            "paragraph": (
+                "Peach Suite Pro Solo and PeachPOS are available "
+                "with a 10-day free trial. Use discount code "
+                "LAUNCH10 when subscribing to save 10% on "
+                "monthly or yearly subscriptions. Enter the "
+                "code in the discount field on the signup form."
+            ),
+        }
+        content_source = "existing website wording"
+
+    return render_template(
+        "master_admin_website_intro.html",
+        surface=surface,
+        page_label=page_label,
+        intro=intro,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_save_draft(surface):
+    """Save a private introduction draft without publishing."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        save_section_draft,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    content = {
+        "intro": {
+            "heading": request.form.get("heading", ""),
+            "paragraph": request.form.get("paragraph", ""),
+        }
+    }
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = save_section_draft(
+                conn,
+                section_key=f"{surface}.intro",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer introduction draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_editor",
+                    surface=surface,
+                )
+            )
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_editor",
+                    surface=surface,
+                )
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Introduction draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "master_admin_website_intro_editor",
+            surface=surface,
+        )
+    )
+
+
+@app.route(
     "/master-admin/website",
     methods=["GET"],
 )
