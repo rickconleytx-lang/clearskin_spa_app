@@ -65589,6 +65589,227 @@ def master_admin_website_peachweb_editor():
 
 
 @app.route(
+    "/master-admin/website/<surface>/intro/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_publish_review(surface):
+    """Privately review one exact introduction draft."""
+    from flask import make_response
+    from services.psp_marketing_cms_page_intro import (
+        normalize_page_intro_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    section_key = f"{surface}.intro"
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_section_state(
+            conn,
+            section_key=section_key,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    draft_id = state["draft_revision_id"]
+    draft_content = state["draft_content"]
+    published_id = state["published_revision_id"]
+    published_content = state["published_content"]
+
+    if (draft_id is None) != (draft_content is None):
+        abort(500)
+
+    if (published_id is None) != (published_content is None):
+        abort(500)
+
+    if draft_id is None:
+        flash(
+            "Save an introduction draft before reviewing "
+            "it for publication.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "master_admin_website_intro_editor",
+                surface=surface,
+            )
+        )
+
+    draft_intro = normalize_page_intro_content(
+        section_key,
+        draft_content,
+    )["intro"]
+
+    published_intro = None
+
+    if published_content is not None:
+        published_intro = normalize_page_intro_content(
+            section_key,
+            published_content,
+        )["intro"]
+
+    response = make_response(
+        render_template(
+            "master_admin_website_intro_publish_review.html",
+            surface=surface,
+            page_label=page_label,
+            draft_revision_id=draft_id,
+            draft_intro=draft_intro,
+            published_revision_id=published_id,
+            published_intro=published_intro,
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/publish",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_publish_draft(surface):
+    """Publish an explicitly confirmed introduction revision."""
+    from services.psp_marketing_cms_intro_publication import (
+        publish_intro_draft,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if str(
+        request.form.get("publish_confirmation") or ""
+    ).strip() != "PUBLISH":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if not 0 < actor_id <= 9223372036854775807:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    def parse_revision(field, *, required):
+        raw = request.form.get(field)
+
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if not value:
+            if required:
+                abort(400)
+            return None
+
+        if (
+            len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if not 0 < number <= 9223372036854775807:
+            abort(400)
+
+        return number
+
+    draft_revision_id = parse_revision(
+        "expected_draft_revision_id",
+        required=True,
+    )
+
+    published_revision_id = parse_revision(
+        "expected_published_revision_id",
+        required=False,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = publish_intro_draft(
+                conn,
+                section_key=f"{surface}.intro",
+                actor_id=actor_id,
+                expected_draft_revision_id=draft_revision_id,
+                expected_published_revision_id=(
+                    published_revision_id
+                ),
+            )
+        except MarketingCMSConflict:
+            flash(
+                "The introduction draft or publication "
+                "has changed. Reload and review it before "
+                "publishing again.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_publish_review",
+                    surface=surface,
+                )
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Introduction CMS revision "
+        f"{result['revision_id']} published successfully. "
+        "Public-page CMS rendering is not yet connected.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "master_admin_website_intro_publish_review",
+            surface=surface,
+        )
+    )
+
+
+@app.route(
     "/master-admin/website/<surface>/intro",
     methods=["GET"],
 )
