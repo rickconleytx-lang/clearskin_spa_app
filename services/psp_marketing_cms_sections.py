@@ -53,6 +53,18 @@ _SECTION_SPECS = (
         ("home",),
     ),
     MarketingSection(
+        "packages.intro",
+        "Subscription Packages Introduction",
+        "intro",
+        ("packages",),
+    ),
+    MarketingSection(
+        "pricing.intro",
+        "Pricing Introduction",
+        "intro",
+        ("pricing",),
+    ),
+    MarketingSection(
         "product.solo",
         "Solo",
         "product",

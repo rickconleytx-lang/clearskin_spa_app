@@ -14,8 +14,8 @@ from services.psp_marketing_cms_sections import (
 
 class MarketingCMSSectionsTests(unittest.TestCase):
 
-    def test_nine_independent_sections(self):
-        self.assertEqual(len(SECTION_REGISTRY), 9)
+    def test_eleven_independent_sections(self):
+        self.assertEqual(len(SECTION_REGISTRY), 11)
 
     def test_legacy_home_key_preserved(self):
         spec = get_section_spec("home")
@@ -116,7 +116,10 @@ class MarketingCMSSectionsTests(unittest.TestCase):
                     spec.key
                     for spec in sections_for_surface(surface)
                 }
-                self.assertEqual(keys, expected)
+                self.assertEqual(
+                    keys,
+                    expected | {f"{surface}.intro"},
+                )
 
     def test_unknown_section_rejected(self):
         with self.assertRaises(MarketingCMSSectionError):
