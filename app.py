@@ -5712,6 +5712,53 @@ def _render_public_tenant_home(tenant):
     )
 
 
+def _load_public_marketing_intro(section_key):
+    """Read a published introduction with static-copy fallback."""
+    from services.psp_marketing_cms_public_intro import (
+        load_published_intro,
+    )
+
+    conn = None
+    published_intro = None
+
+    try:
+        conn = get_db_connection()
+        published_intro = load_published_intro(
+            conn,
+            section_key=section_key,
+        )
+    except Exception:
+        app.logger.exception(
+            "Published marketing introduction unavailable "
+            "for %s; retaining existing public wording.",
+            section_key,
+        )
+        published_intro = None
+    finally:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                app.logger.exception(
+                    "Marketing introduction read rollback "
+                    "failed for %s.",
+                    section_key,
+                )
+                published_intro = None
+
+            try:
+                conn.close()
+            except Exception:
+                app.logger.exception(
+                    "Marketing introduction connection "
+                    "close failed for %s.",
+                    section_key,
+                )
+                published_intro = None
+
+    return published_intro
+
+
 @app.before_request
 def route_public_marketing_site():
     """
@@ -5825,7 +5872,10 @@ def route_public_marketing_site():
         "/subscription-packages/",
     }:
         return render_template(
-            "public_site/psp_packages.html"
+            "public_site/psp_packages.html",
+            cms_intro=_load_public_marketing_intro(
+                "packages.intro"
+            ),
         )
 
     if request.path in {
@@ -5833,7 +5883,10 @@ def route_public_marketing_site():
         "/pricing/",
     }:
         return render_template(
-            "public_site/psp_pricing.html"
+            "public_site/psp_pricing.html",
+            cms_intro=_load_public_marketing_intro(
+                "pricing.intro"
+            ),
         )
 
     if request.path in {
