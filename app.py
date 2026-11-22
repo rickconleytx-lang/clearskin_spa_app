@@ -65589,6 +65589,245 @@ def master_admin_website_peachweb_editor():
 
 
 @app.route(
+    "/master-admin/website/<surface>/intro/restore/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_restore_review(surface):
+    """Review an eligible historical introduction without writing."""
+    from flask import make_response
+    from services.psp_marketing_cms_intro_history import (
+        load_intro_history,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    raw_id = request.args.get("revision_id")
+
+    if raw_id is None:
+        abort(404)
+
+    raw_id = str(raw_id).strip()
+
+    if (
+        not raw_id
+        or len(raw_id) > 19
+        or not raw_id.isascii()
+        or not raw_id.isdecimal()
+    ):
+        abort(404)
+
+    revision_id = int(raw_id)
+
+    if not 0 < revision_id <= 9223372036854775807:
+        abort(404)
+
+    conn = get_db_connection()
+
+    try:
+        history = load_intro_history(
+            conn,
+            section_key=f"{surface}.intro",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    published_id = history["published_revision_id"]
+
+    if published_id is None or published_id == revision_id:
+        abort(404)
+
+    target = next(
+        (
+            item
+            for item in history["revisions"]
+            if item["revision_id"] == revision_id
+        ),
+        None,
+    )
+
+    current = next(
+        (
+            item
+            for item in history["revisions"]
+            if item["revision_id"] == published_id
+        ),
+        None,
+    )
+
+    if (
+        target is None
+        or current is None
+        or not target["was_published"]
+        or target["is_published"]
+        or not current["is_published"]
+    ):
+        abort(404)
+
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    response = make_response(
+        render_template(
+            "master_admin_website_intro_restore_review.html",
+            surface=surface,
+            page_label=page_label,
+            target=target,
+            current=current,
+            draft_revision_id=history["draft_revision_id"],
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/restore",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_restore_revision(surface):
+    """Restore a previously published introduction after confirmation."""
+    from services.psp_marketing_cms_intro_publication import (
+        restore_intro_revision,
+    )
+    from services.psp_marketing_cms_publication import (
+        MarketingCMSUnpublishedRevision,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if str(
+        request.form.get("restore_confirmation") or ""
+    ).strip() != "RESTORE":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid administrator")
+
+        actor_id = int(raw_actor)
+
+        if not 0 < actor_id <= 9223372036854775807:
+            raise ValueError("Invalid administrator")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    def required_revision(field):
+        raw = request.form.get(field)
+
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if (
+            not value
+            or len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if not 0 < number <= 9223372036854775807:
+            abort(400)
+
+        return number
+
+    target_revision_id = required_revision("revision_id")
+    expected_published_id = required_revision(
+        "expected_published_revision_id"
+    )
+
+    if target_revision_id == expected_published_id:
+        abort(400)
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = restore_intro_revision(
+                conn,
+                section_key=f"{surface}.intro",
+                actor_id=actor_id,
+                revision_id=target_revision_id,
+                expected_published_revision_id=(
+                    expected_published_id
+                ),
+            )
+        except MarketingCMSUnpublishedRevision:
+            flash(
+                "This introduction revision was never "
+                "published and cannot be restored.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_history",
+                    surface=surface,
+                )
+            )
+        except MarketingCMSConflict:
+            flash(
+                "The published introduction has changed. "
+                "Reload its history and review again.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_history",
+                    surface=surface,
+                )
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Introduction CMS revision "
+        f"{result['revision_id']} restored successfully. "
+        "Your saved draft was preserved. "
+        "Public-page CMS rendering is not yet connected.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "master_admin_website_intro_history",
+            surface=surface,
+        )
+    )
+
+
+@app.route(
     "/master-admin/website/<surface>/intro/history",
     methods=["GET"],
 )
