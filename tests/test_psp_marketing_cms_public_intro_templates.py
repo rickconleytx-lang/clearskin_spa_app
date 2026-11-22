@@ -222,9 +222,30 @@ class PublicIntroductionTemplateTests(unittest.TestCase):
                     "border-radius: 14px;",
                     source,
                 )
+                expected = (
+                    'style="margin:0; color:#352e2b;"'
+                    if page == "pricing"
+                    else 'style="margin:0;"'
+                )
+                self.assertIn(expected, source)
+
+    def test_pricing_promotional_text_is_dark(self):
+        for intro in (
+            None,
+            self.published(
+                heading="Published Heading",
+                paragraph="Use LAUNCH10 to save.",
+            ),
+        ):
+            with self.subTest(published=bool(intro)):
+                output = self.render("pricing", intro)
                 self.assertIn(
-                    'style="margin:0;"',
-                    source,
+                    'style="margin:0; color:#352e2b;"',
+                    output,
+                )
+                self.assertIn(
+                    "<strong>LAUNCH10</strong>",
+                    output,
                 )
 
     def test_other_public_sections_preserved(self):
