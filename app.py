@@ -66224,8 +66224,11 @@ def master_admin_website_product_editor(product_key):
         source = "published CMS content"
         no_snapshot = False
     else:
-        content = blank_product_content(label, default_status)
-        source = "uninitialized CMS fields"
+        from services.psp_marketing_cms_product_baseline import (
+            get_product_baseline,
+        )
+        content = get_product_baseline(product_key)
+        source = "original website copy (unsaved baseline)"
         no_snapshot = True
 
     return render_template(
