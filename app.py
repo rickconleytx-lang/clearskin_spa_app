@@ -66157,6 +66157,198 @@ def master_admin_website_intro_publish_draft(surface):
     )
 
 
+
+@app.route(
+    "/master-admin/website/products/<product_key>",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_editor(product_key):
+    """Private editor for one shared subscription product."""
+    from services.psp_marketing_cms_product_content import (
+        normalize_product_content,
+    )
+    from services.psp_marketing_cms_product_form import (
+        blank_product_content,
+        format_feature_headings,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSNotFound,
+        load_section_state,
+    )
+
+    products = {
+        "solo": ("🍑 Solo", "available"),
+        "peachpos": ("🍑 PeachPOS", "available"),
+        "team": ("👥 Team", "coming_soon"),
+        "collective": ("🍑 Peach Collective", "coming_soon"),
+    }
+    if product_key not in products:
+        abort(404)
+
+    section_key = f"product.{product_key}"
+    conn = get_db_connection()
+    try:
+        try:
+            state = load_section_state(
+                conn, section_key=section_key
+            )
+        except MarketingCMSNotFound:
+            flash(
+                "This product CMS section has not been "
+                "provisioned in the database.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    label, default_status = products[product_key]
+
+    if state["draft_content"] is not None:
+        content = normalize_product_content(
+            state["draft_content"]
+        )
+        source = "saved draft"
+        no_snapshot = False
+    elif state["published_content"] is not None:
+        content = normalize_product_content(
+            state["published_content"]
+        )
+        source = "published CMS content"
+        no_snapshot = False
+    else:
+        content = blank_product_content(label, default_status)
+        source = "uninitialized CMS fields"
+        no_snapshot = True
+
+    return render_template(
+        "master_admin_website_product.html",
+        product_key=product_key,
+        product_label=label,
+        content=content,
+        content_source=source,
+        no_snapshot=no_snapshot,
+        heading_lines=format_feature_headings(
+            content["packages"]["feature_headings"]
+        ),
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_save_draft(product_key):
+    """Save a validated private product draft, without publishing."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_product_form import (
+        parse_product_form,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSNotFound,
+        save_section_draft,
+    )
+
+    if product_key not in (
+        "solo", "peachpos", "team", "collective"
+    ):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor)
+        if not 0 < actor_id <= 9223372036854775807:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    raw_revision = request.form.get(
+        "expected_draft_revision_id"
+    )
+    if raw_revision is None:
+        abort(400)
+
+    raw_revision = str(raw_revision).strip()
+    if raw_revision:
+        if (
+            len(raw_revision) > 19
+            or not raw_revision.isascii()
+            or not raw_revision.isdecimal()
+        ):
+            abort(400)
+        expected_revision = int(raw_revision)
+        if not 0 < expected_revision <= 9223372036854775807:
+            abort(400)
+    else:
+        expected_revision = None
+
+    editor_url = url_for(
+        "master_admin_website_product_editor",
+        product_key=product_key,
+    )
+
+    try:
+        content = parse_product_form(request.form)
+    except MarketingContentError as exc:
+        flash(str(exc), "error")
+        return redirect(editor_url)
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = save_section_draft(
+                conn,
+                section_key=f"product.{product_key}",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer product draft exists. Reload "
+                "the editor before saving again.",
+                "error",
+            )
+            return redirect(editor_url)
+        except MarketingCMSNotFound:
+            flash(
+                "Product CMS section state is missing.",
+                "error",
+            )
+            return redirect(editor_url)
+    finally:
+        conn.close()
+
+    flash(
+        "Product draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+    return redirect(editor_url)
+
+
 @app.route(
     "/master-admin/website/<surface>/intro",
     methods=["GET"],

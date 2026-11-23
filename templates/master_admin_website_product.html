@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div style="max-width:1050px; margin:0 auto; padding:20px;">
+
+  <a class="btn"
+     href="{{ url_for('master_admin_website_management') }}">
+    Back to Website Management
+  </a>
+
+  <h1 style="margin:24px 0 10px;">
+    {{ product_label }} — Product Editor
+  </h1>
+
+  <p>
+    Editing {{ content_source }}. Save Draft stores your
+    changes privately. Nothing changes on the public website
+    until a separate publication is completed.
+  </p>
+
+  <nav aria-label="Select product"
+       style="display:flex; gap:10px; flex-wrap:wrap; margin:20px 0;">
+    {% for key, label in [
+      ('solo', 'Solo'),
+      ('peachpos', 'PeachPOS'),
+      ('team', 'Team'),
+      ('collective', 'Collective')
+    ] %}
+      <a class="btn"
+         href="{{ url_for(
+           'master_admin_website_product_editor',
+           product_key=key
+         ) }}"
+         {% if key == product_key %}aria-current="page"{% endif %}>
+        {{ label }}
+      </a>
+    {% endfor %}
+  </nav>
+
+  {% if no_snapshot %}
+  <div role="alert" style="
+      border:1px solid #b97723;
+      border-radius:10px;
+      padding:16px;
+      margin:18px 0;">
+    <strong>Initial content not imported yet.</strong>
+    These fields are not a copy of the existing public card.
+    Before saving an initial product draft, we must reconcile
+    its content with the current Packages and Pricing pages.
+    Do not publish incomplete product content.
+  </div>
+  {% endif %}
+
+  <div style="
+      border:1px solid #c9b8aa;
+      border-radius:10px;
+      padding:16px;
+      margin:20px 0;">
+    <strong>Stripe price reminder</strong>
+    <p style="margin:8px 0 0;">
+      Monthly and annual prices here are for website display
+      only. Editing them does not update Stripe. Check the
+      displayed prices against Stripe before publishing.
+    </p>
+  </div>
+
+  <form method="POST"
+        action="{{ url_for(
+          'master_admin_website_product_save_draft',
+          product_key=product_key
+        ) }}">
+
+    <input type="hidden"
+           name="security_csrf_token"
+           value="{{ security_csrf_token }}">
+
+    <input type="hidden"
+           name="expected_draft_revision_id"
+           value="{{ draft_revision_id if draft_revision_id is not none else '' }}">
+
+    <section style="
+        border:1px solid #ccc;
+        border-radius:12px;
+        padding:22px;
+        margin:24px 0;">
+
+      <h2>1. Shared Product Information</h2>
+      <p>
+        These values will be shared by Subscription Packages
+        and Pricing when published.
+      </p>
+
+      <div style="margin:16px 0;">
+        <label for="product-status">
+          <strong>Availability Status</strong>
+        </label>
+        <select id="product-status"
+                name="shared__status"
+                style="display:block;width:100%;padding:8px;margin-top:6px;">
+          {% for key, label in [
+            ('available', 'Available Now'),
+            ('coming_soon', 'Coming Soon'),
+            ('planned', 'Planned'),
+            ('discontinued', 'Discontinued')
+          ] %}
+          <option value="{{ key }}"
+                  {% if content.shared.status == key %}selected{% endif %}>
+            {{ label }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% set shared_fields = [
+        ('bubble_text', 'Status Bubble Text', 100),
+        ('name', 'Product Display Name', 80),
+        ('monthly_price', 'Monthly Display Price', 40),
+        ('monthly_unit', 'Monthly Price Unit', 60),
+        ('annual_price', 'Annual Display Price', 40),
+        ('annual_unit', 'Annual Price Unit', 60)
+      ] %}
+
+      {% for field, label, maximum in shared_fields %}
+      <div style="margin:16px 0;">
+        <label for="shared-{{ field }}">
+          <strong>{{ label }}</strong>
+        </label>
+        <input id="shared-{{ field }}"
+               type="text"
+               name="shared__{{ field }}"
+               value="{{ content.shared[field] }}"
+               maxlength="{{ maximum }}"
+               required
+               style="
+                 display:block;
+                 width:100%;
+                 box-sizing:border-box;
+                 padding:9px;
+                 margin-top:6px;">
+      </div>
+      {% endfor %}
+
+      <div style="margin:20px 0;">
+        <label for="product-features">
+          <strong>Included Features — Shared Ordered List</strong>
+        </label>
+        <p style="margin:6px 0;">
+          Enter one feature per line, in the order you want.
+          Packages will display all features; Pricing will
+          display the first 10.
+        </p>
+        <textarea id="product-features"
+                  name="features_text"
+                  rows="15"
+                  style="
+                    display:block;
+                    width:100%;
+                    box-sizing:border-box;
+                    padding:10px;">{{ content.shared.features | join('\n') }}</textarea>
+      </div>
+    </section>
+
+    {% set page_fields = [
+      ('top_statement_1', 'Top Statement 1', 600),
+      ('top_statement_2', 'Top Statement 2', 600),
+      ('button_text', 'Button Text', 100),
+      ('bottom_heading', 'Bottom Heading', 150),
+      ('bottom_statement', 'Bottom Statement', 600)
+    ] %}
+
+    {% for surface, label in [
+      ('packages', 'Subscription Packages'),
+      ('pricing', 'Pricing Page')
+    ] %}
+    <section style="
+        border:1px solid #ccc;
+        border-radius:12px;
+        padding:22px;
+        margin:24px 0;">
+
+      <h2>{{ loop.index + 1 }}. {{ label }} Content</h2>
+      <p>
+        These fields are independent of the other page.
+      </p>
+
+      {% for field, field_label, maximum in page_fields %}
+      <div style="margin:18px 0;">
+        <label for="{{ surface }}-{{ field }}">
+          <strong>{{ field_label }}</strong>
+        </label>
+
+        {% if field in ('button_text', 'bottom_heading') %}
+        <input type="text"
+               id="{{ surface }}-{{ field }}"
+               name="{{ surface }}__{{ field }}"
+               maxlength="{{ maximum }}"
+               value="{{ content[surface][field] }}"
+               {% if field == 'button_text' %}required{% endif %}
+               style="
+                 display:block;
+                 width:100%;
+                 box-sizing:border-box;
+                 padding:9px;
+                 margin-top:6px;">
+        {% else %}
+        <textarea id="{{ surface }}-{{ field }}"
+                  name="{{ surface }}__{{ field }}"
+                  maxlength="{{ maximum }}"
+                  rows="4"
+                  style="
+                    display:block;
+                    width:100%;
+                    box-sizing:border-box;
+                    padding:9px;
+                    margin-top:6px;">{{ content[surface][field] }}</textarea>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      {% if surface == 'packages' %}
+      <div style="margin:20px 0;">
+        <label for="feature-headings">
+          <strong>Feature Group Headings</strong>
+        </label>
+        <p style="margin:6px 0;">
+          Optional. One heading per line. Enter the
+          one-based feature position followed by a vertical
+          bar and the heading. For example:
+          <code>1 | Includes everything in Solo plus:</code>
+        </p>
+        <textarea id="feature-headings"
+                  name="packages_feature_headings_text"
+                  rows="5"
+                  style="
+                    display:block;
+                    width:100%;
+                    box-sizing:border-box;
+                    padding:10px;">{{ heading_lines }}</textarea>
+      </div>
+      {% endif %}
+
+    </section>
+    {% endfor %}
+
+    <button type="submit" class="btn">
+      Save Private Draft
+    </button>
+
+    <p style="margin:14px 0;">
+      <em>
+        Saving does not publish this product.
+        Publication review and history controls will be
+        connected in a separate protected step.
+      </em>
+    </p>
+  </form>
+</div>
+{% endblock %}
