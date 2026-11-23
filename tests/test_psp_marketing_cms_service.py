@@ -405,10 +405,13 @@ class MarketingCMSSectionDraftTests(unittest.TestCase):
 
         conn.cursor.assert_not_called()
 
-    def test_unimplemented_product_rejected_before_sql(self):
+    def test_invalid_product_rejected_before_sql(self):
+        from services.psp_marketing_cms_content import (
+            MarketingContentError,
+        )
         conn, _ = fake_connection([])
 
-        with self.assertRaises(MarketingCMSSectionError):
+        with self.assertRaises(MarketingContentError):
             save_section_draft(
                 conn,
                 section_key="product.solo",

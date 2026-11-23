@@ -151,6 +151,11 @@ def save_section_draft(
             section.key,
             content,
         )
+    elif section.kind == "product":
+        from services.psp_marketing_cms_product_content import (
+            normalize_product_content,
+        )
+        normalized = normalize_product_content(content)
     else:
         raise MarketingCMSSectionError(
             "Draft saving is not yet supported for this section."
