@@ -207,6 +207,45 @@
 
         <h2>Subscription Packages &amp; Pricing</h2>
 
+            <!-- PRODUCT EDITOR NAV START -->
+            <div style="
+                border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin: 20px 0 28px;
+            ">
+                <h3>Subscription Product Cards</h3>
+
+                <p>
+                    Edit shared product details and the independent
+                    Packages and Pricing descriptions. Changes
+                    remain private until separately published.
+                </p>
+
+                <div style="
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 12px;
+                    margin-top: 18px;
+                ">
+                    {% for product_key, product_label in [
+                        ('solo', 'Solo'),
+                        ('peachpos', 'PeachPOS'),
+                        ('team', 'Team'),
+                        ('collective', 'Peach Collective')
+                    ] %}
+                    <a class="btn"
+                       href="{{ url_for(
+                           'master_admin_website_product_editor',
+                           product_key=product_key
+                       ) }}">
+                        Edit {{ product_label }}
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            <!-- PRODUCT EDITOR NAV END -->
+
         <p>
             Edit the introduction for each page independently.
             Save Draft does not change the public website.
