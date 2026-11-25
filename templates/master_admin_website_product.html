@@ -256,5 +256,25 @@
       </em>
     </p>
   </form>
+
+  <div style="margin:22px 0; padding:18px; border:1px solid #bca894; border-radius:12px;">
+    <strong>Published Product History</strong>
+    <p style="margin:10px 0;">View previous publications and restore a previously published revision. Restoring changes the public product cards but does not change Stripe billing.</p>
+    <a class="btn" href="{{ url_for('master_admin_website_product_history', product_key=product_key) }}">
+      View Publication History
+    </a>
+  </div>
+
+
+  {% if draft_revision_id %}
+  <div style="margin:22px 0; padding:18px; border:1px solid #bca894; border-radius:12px;">
+    <strong>Ready to review your saved draft?</strong>
+    <p style="margin:10px 0;">Reviewing is private. Publishing requires a separate confirmation.</p>
+    <a class="btn" href="{{ url_for('master_admin_website_product_publish_review', product_key=product_key) }}">
+      Review Draft for Publication
+    </a>
+  </div>
+  {% endif %}
+
 </div>
 {% endblock %}

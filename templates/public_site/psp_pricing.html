@@ -531,6 +531,13 @@
         <div class="pricing-grid">
 
             <article class="price-card featured">
+{# Show exactly the current published snapshot, or the original static card. #}
+{% set cms_card_product = cms_products.get('solo') if cms_products is defined and cms_products else none %}
+{% if cms_card_product %}
+{% set cms_card_key = 'solo' %}
+{% set cms_surface = 'pricing' %}
+{% include "public_site/psp_product_published_card.html" %}
+{% else %}
                 <span class="status live">Available Now</span>
 
                 <h3>🍑 Solo</h3>
@@ -570,10 +577,19 @@
                     A payment method is required at checkout.
                     Billing begins after the trial unless canceled before it ends.
                 </div>
-            </article>
+
+{% endif %}
+</article>
 
 
             <article class="price-card">
+{# Show exactly the current published snapshot, or the original static card. #}
+{% set cms_card_product = cms_products.get('peachpos') if cms_products is defined and cms_products else none %}
+{% if cms_card_product %}
+{% set cms_card_key = 'peachpos' %}
+{% set cms_surface = 'pricing' %}
+{% include "public_site/psp_product_published_card.html" %}
+{% else %}
                 <span class="status live">Available Now</span>
 
                 <h3>🍑 PeachPOS</h3>
@@ -607,10 +623,19 @@
                 <a class="btn btn-primary" href="/signup/pos">
     Start 10-Day Free Trial
 </a>
-            </article>
+
+{% endif %}
+</article>
 
 
             <article class="price-card">
+{# Show exactly the current published snapshot, or the original static card. #}
+{% set cms_card_product = cms_products.get('team') if cms_products is defined and cms_products else none %}
+{% if cms_card_product %}
+{% set cms_card_key = 'team' %}
+{% set cms_surface = 'pricing' %}
+{% include "public_site/psp_product_published_card.html" %}
+{% else %}
                 <span class="status coming">Available November 30</span>
 
                 <h3>👥 Team</h3>
@@ -639,10 +664,19 @@
                 </ul>
 
                 <span class="btn btn-disabled">Coming November 30</span>
-            </article>
+
+{% endif %}
+</article>
 
 
             <article class="price-card">
+{# Show exactly the current published snapshot, or the original static card. #}
+{% set cms_card_product = cms_products.get('collective') if cms_products is defined and cms_products else none %}
+{% if cms_card_product %}
+{% set cms_card_key = 'collective' %}
+{% set cms_surface = 'pricing' %}
+{% include "public_site/psp_product_published_card.html" %}
+{% else %}
                 <span class="status coming">Available January 2027</span>
 
                 <h3>🍑 Peach Collective</h3>
@@ -670,7 +704,9 @@
                 </ul>
 
                 <span class="btn btn-disabled">Coming January 2027</span>
-            </article>
+
+{% endif %}
+</article>
 
         </div>
     </div>

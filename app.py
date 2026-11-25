@@ -5712,6 +5712,43 @@ def _render_public_tenant_home(tenant):
     )
 
 
+def _load_public_marketing_products():
+    """Use published product revisions only; retain static fallback on error."""
+    from services.psp_marketing_cms_public_product import (
+        load_published_products,
+    )
+
+    conn = None
+    products = {}
+    try:
+        conn = get_db_connection()
+        products = load_published_products(conn)
+    except Exception:
+        app.logger.exception(
+            "Published marketing product lookup unavailable; "
+            "retaining existing public product cards."
+        )
+        products = {}
+    finally:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                app.logger.exception(
+                    "Published marketing product read rollback failed."
+                )
+                products = {}
+            try:
+                conn.close()
+            except Exception:
+                app.logger.exception(
+                    "Published marketing product connection close failed."
+                )
+                products = {}
+
+    return products
+
+
 def _load_public_marketing_intro(section_key):
     """Read a published introduction with static-copy fallback."""
     from services.psp_marketing_cms_public_intro import (
@@ -5873,6 +5910,7 @@ def route_public_marketing_site():
     }:
         return render_template(
             "public_site/psp_packages.html",
+            cms_products=_load_public_marketing_products(),
             cms_intro=_load_public_marketing_intro(
                 "packages.intro"
             ),
@@ -5884,6 +5922,7 @@ def route_public_marketing_site():
     }:
         return render_template(
             "public_site/psp_pricing.html",
+            cms_products=_load_public_marketing_products(),
             cms_intro=_load_public_marketing_intro(
                 "pricing.intro"
             ),
@@ -66350,6 +66389,306 @@ def master_admin_website_product_save_draft(product_key):
         "success",
     )
     return redirect(editor_url)
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_publish_review(product_key):
+    """Preview one private saved product draft before explicit publication."""
+    from flask import make_response
+    from services.psp_marketing_cms_product_content import (
+        normalize_product_content,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSNotFound,
+        load_section_state,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+
+    editor_url = url_for(
+        "master_admin_website_product_editor", product_key=product_key
+    )
+    conn = get_db_connection()
+    try:
+        try:
+            state = load_section_state(conn, section_key=f"product.{product_key}")
+        except MarketingCMSNotFound:
+            flash("The product CMS section has not been provisioned.", "error")
+            return redirect(editor_url)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    draft_id = state["draft_revision_id"]
+    draft_content = state["draft_content"]
+    published_id = state["published_revision_id"]
+    published_content = state["published_content"]
+    if ((draft_id is None) != (draft_content is None)) or (
+        (published_id is None) != (published_content is None)
+    ):
+        abort(500)
+
+    if draft_id is None:
+        flash("Save a private product draft before reviewing for publication.", "error")
+        return redirect(editor_url)
+
+    content = normalize_product_content(draft_content)
+    response = make_response(render_template(
+        "master_admin_website_product_publish_review.html",
+        product_key=product_key,
+        content=content,
+        draft_revision_id=draft_id,
+        published_revision_id=published_id,
+        security_csrf_token=_security_form_csrf_token(),
+    ))
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/publish",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_publish_draft(product_key):
+    """Publish exactly the approved product revision after confirmation."""
+    from services.psp_marketing_cms_content import MarketingContentError
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSNotFound,
+        MarketingCMSConfigurationError,
+    )
+    from services.psp_marketing_cms_product_publication import (
+        publish_product_draft,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+    if not _security_form_csrf_valid(request.form.get("security_csrf_token")):
+        abort(400)
+    if str(request.form.get("publish_confirmation") or "").strip() != "PUBLISH":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    if isinstance(raw_actor, bool):
+        abort(403)
+    try:
+        actor_id = int(raw_actor)
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+    if not (0 < actor_id <= 9223372036854775807):
+        abort(403)
+
+    def parse_revision(field, *, required):
+        raw = request.form.get(field)
+        if raw is None:
+            abort(400)
+        value = str(raw).strip()
+        if not value and not required:
+            return None
+        if (not value or len(value) > 19 or not value.isascii()
+                or not value.isdecimal()):
+            abort(400)
+        number = int(value)
+        if not (0 < number <= 9223372036854775807):
+            abort(400)
+        return number
+
+    draft_id = parse_revision("expected_draft_revision_id", required=True)
+    published_id = parse_revision("expected_published_revision_id", required=False)
+    editor_url = url_for(
+        "master_admin_website_product_editor", product_key=product_key
+    )
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = publish_product_draft(
+                conn,
+                product_key=product_key,
+                actor_id=actor_id,
+                expected_draft_revision_id=draft_id,
+                expected_published_revision_id=published_id,
+            )
+        except (MarketingCMSConflict, MarketingCMSNotFound,
+                MarketingCMSConfigurationError, MarketingContentError,
+                ValueError) as exc:
+            flash("Product publication was not completed: " + str(exc), "error")
+            return redirect(editor_url)
+    finally:
+        conn.close()
+
+    flash(
+        "Product revision " + str(result["revision_id"])
+        + " published successfully to the marketing CMS. ",
+        "success",
+    )
+    return redirect(editor_url)
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/history",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_history(product_key):
+    """Private, section-scoped publication history for one product."""
+    from flask import make_response
+    from services.psp_marketing_cms_service import (
+        MarketingCMSNotFound, load_section_state,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+
+    editor_url = url_for(
+        "master_admin_website_product_editor", product_key=product_key
+    )
+    page_key = f"product.{product_key}"
+    conn = get_db_connection()
+    try:
+        try:
+            state = load_section_state(conn, section_key=page_key)
+        except MarketingCMSNotFound:
+            flash("Product CMS section is not provisioned.", "error")
+            return redirect(editor_url)
+
+        current_id = state["published_revision_id"]
+        if (current_id is None) != (state["published_content"] is None):
+            abort(500)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT publication_event_id, revision_id,
+                       previous_revision_id, action, performed_by
+                FROM psp_marketing_publication_events
+                WHERE page_key = %s
+                  AND action IN ('publish', 'restore')
+                ORDER BY publication_event_id DESC
+                LIMIT 100
+                """,
+                (page_key,),
+            )
+            history_rows = cur.fetchall()
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    history = [
+        {
+            "event_id": row[0],
+            "revision_id": row[1],
+            "previous_revision_id": row[2],
+            "action": row[3],
+            "performed_by": row[4],
+        }
+        for row in history_rows
+    ]
+    response = make_response(render_template(
+        "master_admin_website_product_history.html",
+        product_key=product_key,
+        current_revision_id=current_id,
+        history=history,
+        security_csrf_token=_security_form_csrf_token(),
+    ))
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/restore",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_restore_revision(product_key):
+    """Restore a previously published product revision after confirmation."""
+    from services.psp_marketing_cms_content import MarketingContentError
+    from services.psp_marketing_cms_product_publication import (
+        MarketingCMSUnpublishedProductRevision,
+        restore_product_revision,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict, MarketingCMSConfigurationError,
+        MarketingCMSNotFound,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+    if not _security_form_csrf_valid(request.form.get("security_csrf_token")):
+        abort(400)
+    if str(request.form.get("restore_confirmation") or "").strip() != "RESTORE":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    if isinstance(raw_actor, bool):
+        abort(403)
+    try:
+        actor_id = int(raw_actor)
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+    if not (0 < actor_id <= 9223372036854775807):
+        abort(403)
+
+    def revision(field, required):
+        raw = request.form.get(field)
+        if raw is None:
+            abort(400)
+        value = str(raw).strip()
+        if not value and not required:
+            return None
+        if (not value or len(value) > 19 or not value.isascii()
+                or not value.isdecimal()):
+            abort(400)
+        number = int(value)
+        if not (0 < number <= 9223372036854775807):
+            abort(400)
+        return number
+
+    target_id = revision("revision_id", True)
+    expected_id = revision("expected_published_revision_id", False)
+    history_url = url_for(
+        "master_admin_website_product_history", product_key=product_key
+    )
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = restore_product_revision(
+                conn,
+                product_key=product_key,
+                actor_id=actor_id,
+                revision_id=target_id,
+                expected_published_revision_id=expected_id,
+            )
+        except (MarketingCMSConflict, MarketingCMSNotFound,
+                MarketingCMSConfigurationError,
+                MarketingCMSUnpublishedProductRevision,
+                MarketingContentError, ValueError) as exc:
+            flash("Product restoration was not completed: " + str(exc), "error")
+            return redirect(history_url)
+    finally:
+        conn.close()
+
+    flash(
+        "Previously published product revision " + str(result["revision_id"])
+        + " restored successfully.", "success",
+    )
+    return redirect(history_url)
 
 
 @app.route(
