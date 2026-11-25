@@ -169,7 +169,7 @@ def set_platform_ai_monthly_limit(
     actor_user_id,
     reason,
 ):
-    """Update the global AI limit while AI is disabled.
+    """Update the global AI limit without changing AI status.
 
     Caller enforces Master Admin authorization and CSRF.
     Caller commits the budget change and audit together.
@@ -254,11 +254,6 @@ def set_platform_ai_monthly_limit(
     if not row:
         raise AIPlatformControlError(
             "Platform AI budget is not configured."
-        )
-
-    if row["ai_enabled"]:
-        raise AIPlatformControlError(
-            "Disable platform AI before changing its spending limit."
         )
 
     previous_limit = row["monthly_limit_usd"]
