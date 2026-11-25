@@ -183,7 +183,7 @@ def set_business_ai_monthly_limit(
     actor_user_id,
     reason,
 ):
-    """Create or update one disabled business AI budget."""
+    """Create or update a business AI budget without changing AI status."""
 
     reason = _validate_identity_and_reason(
         spa_id,
@@ -198,11 +198,6 @@ def set_business_ai_monthly_limit(
     )
 
     _, row = _lock_business_budget(cur, spa_id)
-
-    if row is not None and row["ai_enabled"]:
-        raise BusinessAIControlError(
-            "Disable this business's AI before changing its limit."
-        )
 
     old_limit = (
         row["monthly_limit_usd"]
@@ -298,7 +293,9 @@ def set_business_ai_monthly_limit(
         "ai_budget_id": budget_id,
         "monthly_limit_usd": new_limit,
         "previous_limit_usd": old_limit,
-        "ai_enabled": False,
+        "ai_enabled": (
+            bool(row["ai_enabled"]) if row is not None else False
+        ),
         "audit_log_id": audit_id,
     }
 

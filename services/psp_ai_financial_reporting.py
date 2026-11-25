@@ -220,3 +220,27 @@ def get_business_ai_financial_summaries(cur):
         "business_count": len(businesses),
         "businesses": businesses,
     }
+
+
+def sum_business_ai_monthly_limits(businesses):
+    """Sum configured business allowances, whether enabled or not."""
+    from decimal import Decimal
+
+    seen = {}
+    for business in businesses:
+        spa_id = business["spa_id"]
+        raw = business["monthly_limit_usd"]
+        value = Decimal(str(raw)) if raw is not None else None
+
+        if spa_id in seen:
+            if seen[spa_id] != value:
+                raise ValueError(
+                    "Conflicting limits for the same business."
+                )
+            continue
+        seen[spa_id] = value
+
+    return sum(
+        (value for value in seen.values() if value is not None),
+        Decimal("0"),
+    )

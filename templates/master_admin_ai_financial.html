@@ -75,6 +75,11 @@
     </div>
 
     <div class="summary-card">
+        <span>Total Business Monthly Limits</span>
+        <strong>{{ overview_money(total_business_monthly_limit_usd) }}</strong>
+    </div>
+
+    <div class="summary-card">
         <span>Estimated Settled Costs</span>
         <strong>{{ overview_money(platform.settled_estimated_usd) }}</strong>
     </div>
@@ -117,7 +122,6 @@
         {% endif %}
     </p>
 
-    {% if not platform.ai_enabled %}
 
     <div id="aiPlatformMonthlyLimitEditor"
          style="margin: 22px 0;">
@@ -141,7 +145,7 @@
             enable AI or authorize individual businesses.
         </p>
 
-        <form
+        <form data-ai-confirm="platform-limit"
             id="aiPlatformMonthlyLimitForm"
             method="POST"
             action="{{ url_for('master_admin_ai_monthly_limit') }}"
@@ -194,7 +198,7 @@
 
             <p>
                 <label for="aiPlatformMonthlyLimitReason">
-                    <strong>Reason for change</strong>
+                    <strong>Reason for change (optional)</strong>
                 </label>
             </p>
 
@@ -202,9 +206,9 @@
                 id="aiPlatformMonthlyLimitReason"
                 name="reason"
                 rows="3"
-                minlength="10"
+
                 maxlength="500"
-                required
+
                 style="
                     display: block;
                     width: 100%;
@@ -216,30 +220,7 @@
                 "
             ></textarea>
 
-            <p>
-                Type exactly
-                <strong>SAVE AI MONTHLY LIMIT</strong>
-                to confirm:
-            </p>
-
-            <input
-                type="text"
-                name="confirmation"
-                id="aiPlatformMonthlyLimitConfirmation"
-                maxlength="30"
-                autocomplete="off"
-                required
-                aria-label="Monthly AI limit confirmation phrase"
-                style="
-                    display: block;
-                    width: 100%;
-                    max-width: 350px;
-                    box-sizing: border-box;
-                    padding: 10px;
-                    border-radius: 8px;
-                    margin-bottom: 16px;
-                "
-            >
+            <input type="hidden" name="confirmation" value="">
 
             <button
                 type="submit"
@@ -252,14 +233,7 @@
 
     </div>
 
-    {% else %}
 
-    <p>
-        To change the monthly spending limit,
-        first disable Global AI.
-    </p>
-
-    {% endif %}
 
 </div>
 
@@ -298,7 +272,7 @@
 
     {% else %}
 
-        <form
+        <form data-ai-confirm="platform-toggle"
             id="aiGlobalControlForm"
             method="POST"
             action="{{ url_for('master_admin_ai_platform_control') }}"
@@ -347,36 +321,7 @@
                 "
             ></textarea>
 
-            <p>
-                Type exactly
-                <strong>
-                    {% if platform.ai_enabled %}
-                        DISABLE PLATFORM AI
-                    {% else %}
-                        ENABLE PLATFORM AI
-                    {% endif %}
-                </strong>
-                to confirm:
-            </p>
-
-            <input
-                type="text"
-                id="aiGlobalControlConfirmation"
-                name="confirmation"
-                maxlength="30"
-                required
-                autocomplete="off"
-                aria-label="AI control confirmation phrase"
-                style="
-                    display: block;
-                    width: 100%;
-                    max-width: 350px;
-                    box-sizing: border-box;
-                    padding: 10px;
-                    border-radius: 8px;
-                    margin-bottom: 16px;
-                "
-            >
+            <input type="hidden" name="confirmation" value="">
 
             <button
                 type="submit"
@@ -489,13 +434,12 @@
                     </td>
                     <td class="business-ai-actions">
 
-                        {% if not business.ai_enabled %}
                         <details style="margin-bottom: 0.6rem;">
                             <summary style="cursor: pointer;">
                                 {{ 'Edit Monthly Limit' if business.monthly_limit_usd is not none else 'Set Monthly Limit' }}
                             </summary>
 
-                            <form
+                            <form data-ai-confirm="business-limit"
                                 method="POST"
                                 action="{{ url_for('master_admin_ai_business_control') }}"
                                 autocomplete="off"
@@ -536,35 +480,24 @@
                                 >
 
                                 <label for="businessAILimitReason{{ business.spa_id }}">
-                                    Reason (10–500 characters)
+                                    Reason (optional, up to 500 characters)
                                 </label>
                                 <textarea
                                     id="businessAILimitReason{{ business.spa_id }}"
                                     name="reason"
-                                    minlength="10"
+
                                     maxlength="500"
                                     rows="2"
-                                    required
+
                                 ></textarea>
 
-                                <label for="businessAILimitConfirm{{ business.spa_id }}">
-                                    Type this exact confirmation:
-                                    <code>SET BUSINESS AI LIMIT {{ business.spa_id }}</code>
-                                </label>
-                                <input
-                                    id="businessAILimitConfirm{{ business.spa_id }}"
-                                    type="text"
-                                    name="confirmation"
-                                    required
-                                    spellcheck="false"
-                                >
+                                <input type="hidden" name="confirmation" value="">
 
                                 <button type="submit">
                                     Save Monthly Limit
                                 </button>
                             </form>
                         </details>
-                        {% endif %}
 
                         {% if business.budget_configured
                               and business.monthly_limit_usd is not none
@@ -575,7 +508,7 @@
                                 {{ 'Emergency Disable AI' if business.ai_enabled else 'Enable Business AI' }}
                             </summary>
 
-                            <form
+                            <form data-ai-confirm="business-toggle"
                                 method="POST"
                                 action="{{ url_for('master_admin_ai_business_control') }}"
                                 autocomplete="off"
@@ -614,17 +547,7 @@
                                     required
                                 ></textarea>
 
-                                <label for="businessAIStatusConfirm{{ business.spa_id }}">
-                                    Type this exact confirmation:
-                                    <code>{{ 'DISABLE' if business.ai_enabled else 'ENABLE' }} BUSINESS AI {{ business.spa_id }}</code>
-                                </label>
-                                <input
-                                    id="businessAIStatusConfirm{{ business.spa_id }}"
-                                    type="text"
-                                    name="confirmation"
-                                    required
-                                    spellcheck="false"
-                                >
+                                <input type="hidden" name="confirmation" value="">
 
                                 <button type="submit">
                                     {{ 'Disable Business AI' if business.ai_enabled else 'Enable Business AI' }}
@@ -660,5 +583,211 @@
         </table>
     </div>
 </div>
+
+
+<style>
+.ai-confirm-dialog {
+    box-sizing: border-box;
+    width: min(440px, calc(100vw - 36px));
+    max-width: 440px;
+    padding: 24px;
+    border: 1px solid #d9d9d9;
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.25);
+    color: inherit;
+}
+.ai-confirm-dialog::backdrop {
+    background: rgba(0,0,0,.55);
+}
+.ai-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 24px;
+}
+</style>
+
+<dialog
+    id="aiConfirmDialog"
+    class="ai-confirm-dialog"
+    aria-labelledby="aiConfirmTitle"
+    aria-describedby="aiConfirmDescription"
+>
+    <h2 id="aiConfirmTitle">Confirm AI Change</h2>
+    <p id="aiConfirmDescription"></p>
+    <div class="ai-confirm-actions">
+        <button
+            type="button"
+            id="aiConfirmCancel"
+            class="tool-pill tool-pill-small"
+        >Cancel</button>
+        <button
+            type="button"
+            id="aiConfirmYes"
+            class="tool-pill tool-pill-small"
+        >Yes, Confirm</button>
+    </div>
+</dialog>
+
+<noscript>
+    <p>JavaScript is required to confirm AI management changes.</p>
+</noscript>
+
+<script>
+(function () {
+    "use strict";
+
+    const dialog = document.getElementById("aiConfirmDialog");
+    const title = document.getElementById("aiConfirmTitle");
+    const description = document.getElementById("aiConfirmDescription");
+    const cancel = document.getElementById("aiConfirmCancel");
+    const yes = document.getElementById("aiConfirmYes");
+
+    if (!dialog || !title || !description || !cancel || !yes) {
+        return;
+    }
+
+    let pendingForm = null;
+
+    function field(form, name) {
+        return form.querySelector('[name="' + name + '"]');
+    }
+
+    function describe(form) {
+        const kind = form.dataset.aiConfirm;
+        const actionField = field(form, "action");
+        const action = actionField ? actionField.value : "";
+        const amountField = field(form, "monthly_limit_usd");
+        const amount = amountField ? amountField.value : "";
+
+        const row = form.closest("tr");
+        const nameNode = row ? row.querySelector("td strong") : null;
+        const business = nameNode
+            ? nameNode.textContent.trim()
+            : "this business";
+
+        if (kind === "platform-limit") {
+            return {
+                title: "Change Platform AI Limit?",
+                message: "Set the platform monthly AI limit to $" +
+                    amount + "? AI status and accumulated usage will " +
+                    "remain unchanged.",
+                button: "Yes, Save Limit",
+                danger: false
+            };
+        }
+
+        if (kind === "business-limit") {
+            return {
+                title: "Change Business AI Limit?",
+                message: "Set the monthly AI limit for " +
+                    business + " to $" + amount +
+                    "? Existing usage will be preserved.",
+                button: "Yes, Save Limit",
+                danger: false
+            };
+        }
+
+        if (kind === "platform-toggle") {
+            const disabling = action === "disable";
+            return {
+                title: disabling
+                    ? "Disable All Coach Peach AI?"
+                    : "Enable Platform AI?",
+                message: disabling
+                    ? "New AI spending requests will be blocked " +
+                      "platform-wide. In-flight requests may finish."
+                    : "Allow new AI requests for businesses with " +
+                      "their individual AI access enabled?",
+                button: disabling
+                    ? "Yes, Disable All AI"
+                    : "Yes, Enable AI",
+                danger: disabling
+            };
+        }
+
+        if (kind === "business-toggle") {
+            const disabling = action === "disable";
+            return {
+                title: disabling
+                    ? "Disable Business AI?"
+                    : "Enable Business AI?",
+                message: disabling
+                    ? "Block new AI requests for " + business + "?"
+                    : "Allow AI requests for " + business + "?",
+                button: disabling
+                    ? "Yes, Disable AI"
+                    : "Yes, Enable AI",
+                danger: disabling
+            };
+        }
+
+        return null;
+    }
+
+    document.querySelectorAll(
+        "form[data-ai-confirm]"
+    ).forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+            const confirmation = field(form, "confirmation");
+
+            if (
+                confirmation &&
+                confirmation.value === "confirmed"
+            ) {
+                return;
+            }
+
+            event.preventDefault();
+
+            const details = describe(form);
+            if (!details) {
+                return;
+            }
+
+            pendingForm = form;
+            title.textContent = details.title;
+            description.textContent = details.message;
+            yes.textContent = details.button;
+
+            yes.style.background = details.danger
+                ? "#a12727" : "";
+            yes.style.borderColor = details.danger
+                ? "#a12727" : "";
+            yes.style.color = details.danger
+                ? "white" : "";
+
+            dialog.showModal();
+            cancel.focus();
+        });
+    });
+
+    cancel.addEventListener("click", function () {
+        dialog.close();
+    });
+
+    dialog.addEventListener("close", function () {
+        pendingForm = null;
+    });
+
+    yes.addEventListener("click", function () {
+        const form = pendingForm;
+        if (!form) {
+            return;
+        }
+
+        const confirmation = field(form, "confirmation");
+        if (!confirmation) {
+            return;
+        }
+
+        pendingForm = null;
+        dialog.close();
+        confirmation.value = "confirmed";
+        form.requestSubmit();
+    });
+})();
+</script>
 
 {% endblock %}

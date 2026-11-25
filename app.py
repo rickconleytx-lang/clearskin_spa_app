@@ -64227,13 +64227,8 @@ def master_admin_ai_monthly_limit():
         )
         return redirect(destination)
 
-    if request.form.get("confirmation", "") != (
-        "SAVE AI MONTHLY LIMIT"
-    ):
-        flash(
-            "Monthly limit confirmation did not match.",
-            "error",
-        )
+    if request.form.get("confirmation", "") != "confirmed":
+        flash("Please confirm the monthly AI limit change.", "error")
         return redirect(destination)
 
     try:
@@ -64252,7 +64247,13 @@ def master_admin_ai_monthly_limit():
     expected_limit = request.form.get(
         "expected_limit_usd", ""
     )
-    reason = request.form.get("reason", "")
+    from services.psp_ai_optional_reason import (
+        normalize_limit_change_reason,
+    )
+
+    reason = normalize_limit_change_reason(
+        request.form.get("reason", "")
+    )
 
     conn = None
 
@@ -64353,17 +64354,8 @@ def master_admin_ai_platform_control():
         )
         return redirect(destination)
 
-    required_confirmation = (
-        "ENABLE PLATFORM AI"
-        if action == "enable"
-        else "DISABLE PLATFORM AI"
-    )
-
-    if confirmation != required_confirmation:
-        flash(
-            "AI control confirmation did not match.",
-            "error",
-        )
+    if confirmation != "confirmed":
+        flash("Please confirm the platform AI action.", "error")
         return redirect(destination)
 
     try:
@@ -64476,14 +64468,8 @@ def master_admin_ai_business_control():
         flash("Business or administrator identity invalid.", "error")
         return redirect(destination)
 
-    required_confirmation = {
-        "set_limit": f"SET BUSINESS AI LIMIT {spa_id}",
-        "enable": f"ENABLE BUSINESS AI {spa_id}",
-        "disable": f"DISABLE BUSINESS AI {spa_id}",
-    }[action]
-
-    if request.form.get("confirmation", "") != required_confirmation:
-        flash("Business AI confirmation did not match.", "error")
+    if request.form.get("confirmation", "") != "confirmed":
+        flash("Please confirm the business AI action.", "error")
         return redirect(destination)
 
     expected_enabled = request.form.get("expected_enabled", "")
@@ -64493,6 +64479,13 @@ def master_admin_ai_business_control():
         return redirect(destination)
 
     reason = request.form.get("reason", "")
+
+    if action == "set_limit":
+        from services.psp_ai_optional_reason import (
+            normalize_limit_change_reason,
+        )
+
+        reason = normalize_limit_change_reason(reason)
     conn = None
 
     try:
@@ -64580,6 +64573,7 @@ def master_admin_ai_financial():
     from services.psp_ai_financial_reporting import (
         get_platform_ai_financial_summary,
         get_business_ai_financial_summaries,
+        sum_business_ai_monthly_limits,
     )
 
     conn = get_db_connection()
@@ -64602,6 +64596,12 @@ def master_admin_ai_financial():
 
         from decimal import Decimal
 
+        total_business_monthly_limit_usd = (
+            sum_business_ai_monthly_limits(
+                business_report["businesses"]
+            )
+        )
+
         raw_limit = platform["monthly_limit_usd"]
 
         platform_monthly_limit_display = (
@@ -64618,6 +64618,9 @@ def master_admin_ai_financial():
                     platform_monthly_limit_display
                 ),
                 business_report=business_report,
+                total_business_monthly_limit_usd=(
+                    total_business_monthly_limit_usd
+                ),
                 ai_control_csrf_token=(
                     _security_form_csrf_token()
                 ),
