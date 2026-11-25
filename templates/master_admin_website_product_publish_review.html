@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width:1050px; margin:0 auto; padding:20px;">
+  <a class="btn" href="{{ url_for('master_admin_website_product_editor', product_key=product_key) }}">
+    Back to Product Editor
+  </a>
+  <h1 style="margin:24px 0 12px;">Review {{ content.shared.name }} for Publication</h1>
+  <div role="note" style="border:1px solid #bca894; border-radius:10px; padding:16px; margin:20px 0;">
+    This is a private review of <strong>draft revision {{ draft_revision_id }}</strong>.
+    {% if published_revision_id %}
+      Current published revision: {{ published_revision_id }}.
+    {% else %}
+      This product has not yet been published through the CMS.
+    {% endif %}
+    <p>Once published, the CMS revision can be used by both Subscription Packages and Pricing. Public product-card rendering is connected in a separate development step.</p>
+    <strong>Website display prices do not change Stripe subscription billing.</strong>
+  </div>
+
+  <h2>Shared Product Information</h2>
+  <dl>
+    <dt>Product name</dt><dd>{{ content.shared.name }}</dd>
+    <dt>Status</dt><dd>{{ content.shared.status }}</dd>
+    <dt>Availability wording</dt><dd>{{ content.shared.bubble_text }}</dd>
+    <dt>Monthly price</dt><dd>{{ content.shared.monthly_price }} {{ content.shared.monthly_unit }}</dd>
+    <dt>Annual price</dt><dd>{{ content.shared.annual_price }} {{ content.shared.annual_unit }}</dd>
+  </dl>
+
+  {% for surface, label in [('packages', 'Subscription Packages'), ('pricing', 'Pricing')] %}
+  <section style="border:1px solid #ccc; border-radius:12px; padding:20px; margin:20px 0;">
+    <h2>{{ label }} Page Content</h2>
+    <p><strong>Opening statement:</strong> <span style="white-space:pre-line;">{{ content[surface].top_statement_1 }}</span></p>
+    <p style="white-space:pre-line;">{{ content[surface].top_statement_2 }}</p>
+    <p><strong>Button text:</strong> {{ content[surface].button_text }}</p>
+    <p><strong>Bottom heading:</strong> {{ content[surface].bottom_heading }}</p>
+    <p style="white-space:pre-line;">{{ content[surface].bottom_statement }}</p>
+    {% if surface == 'packages' and content.packages.feature_headings %}
+    <h3>Feature group headings</h3>
+    <ul>{% for heading in content.packages.feature_headings %}
+      <li>Before feature {{ heading.before_feature + 1 }}: {{ heading.text }}</li>
+    {% endfor %}</ul>
+    {% endif %}
+    <h3>Displayed Features</h3>
+    <ul>
+    {% for feature in content.shared.features[:10] if surface == 'pricing' %}
+      <li>{{ feature }}</li>
+    {% endfor %}
+    {% if surface == 'packages' %}
+      {% for feature in content.shared.features %}<li>{{ feature }}</li>{% endfor %}
+    {% endif %}
+    </ul>
+  </section>
+  {% endfor %}
+
+  <form method="POST" action="{{ url_for('master_admin_website_product_publish_draft', product_key=product_key) }}"
+        style="border:2px solid #bca894; border-radius:12px; padding:20px; margin:24px 0;">
+    <h2>Confirm Publication</h2>
+    <p>Review all fields before publishing. To confirm, type <strong>PUBLISH</strong> below.</p>
+    <input type="hidden" name="security_csrf_token" value="{{ security_csrf_token }}">
+    <input type="hidden" name="expected_draft_revision_id" value="{{ draft_revision_id }}">
+    <input type="hidden" name="expected_published_revision_id" value="{{ published_revision_id if published_revision_id is not none else '' }}">
+    <label for="publish_confirmation">Type PUBLISH</label>
+    <input id="publish_confirmation" name="publish_confirmation" autocomplete="off" required
+           maxlength="7" pattern="PUBLISH" style="display:block; padding:10px; margin:8px 0 18px;">
+    <button class="btn" type="submit">Publish This Product Revision</button>
+  </form>
+</div>
+{% endblock %}

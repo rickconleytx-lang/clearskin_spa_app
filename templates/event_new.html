@@ -1,0 +1,3254 @@
+
+{% extends "base.html" %}
+{% block title %}{{ 'Edit Event' if event_edit_id else ('Copy Event' if event_copy_id else 'Add Event') }}{% endblock %}
+
+{% block content %}
+
+<style>
+.event-draft {
+    max-width: 1050px;
+}
+.event-draft .ec-card {
+    border: 1px solid #d9dadd;
+    border-radius: 12px;
+    padding: 22px;
+    margin: 22px 0;
+}
+.event-draft .ec-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+.event-draft .ec-field {
+    min-width: 0;
+}
+.event-draft .ec-field label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 7px;
+}
+.event-draft .ec-field input,
+.event-draft .ec-field select,
+.event-draft .ec-field textarea {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+}
+.event-draft .ec-wide {
+    grid-column: 1 / -1;
+}
+.event-draft .ec-note {
+    opacity: .82;
+    font-size: .95em;
+}
+
+.event-draft .ec-field input[type="checkbox"] {
+    width: auto;
+    max-width: none;
+}
+.event-draft .ec-schedule-bulk {
+    border: 1px solid #d9dadd;
+    border-radius: 10px;
+    padding: 18px;
+    margin: 18px 0;
+}
+.event-draft .ec-day-row {
+    border: 1px solid #d9dadd;
+    border-radius: 10px;
+    padding: 18px;
+    margin: 14px 0;
+}
+.event-draft .ec-day-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.event-draft .ec-day-heading h3 {
+    margin: 0;
+}
+.event-draft .ec-day-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px;
+    margin-top: 16px;
+}
+.event-draft .ec-checkline {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-weight: 500;
+}
+.event-draft .ec-checkline input {
+    width: auto;
+    max-width: none;
+}
+.event-draft .ec-day-status {
+    margin: 14px 0 0;
+    font-size: .92em;
+}
+.event-draft .ec-day-status.is-invalid {
+    color: #a32424;
+    font-weight: 600;
+}
+.event-draft .ec-day-row.is-closed .ec-day-fields {
+    opacity: .55;
+}
+
+
+.event-draft .ec-equipment-bulk,
+.event-draft .ec-equipment-day {
+    border: 1px solid #d9dadd;
+    border-radius: 10px;
+    padding: 18px;
+    margin: 15px 0;
+}
+.event-draft .ec-equipment-choices {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin: 15px 0;
+}
+.event-draft .ec-equipment-choice {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 12px;
+    border: 1px solid #d9dadd;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: normal;
+}
+.event-draft .ec-equipment-choice input {
+    width: auto;
+    flex-shrink: 0;
+}
+.event-draft .ec-equipment-choice span {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.event-draft .ec-equipment-choice small {
+    opacity: .75;
+}
+.event-draft .ec-equipment-day h4 {
+    margin: 0 0 8px;
+}
+.event-draft .ec-equipment-day.is-closed {
+    opacity: .65;
+}
+@media (max-width: 650px) {
+    .event-draft .ec-equipment-choices {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 650px) {
+    .event-draft .ec-grid {
+        grid-template-columns: 1fr;
+    }
+    .event-draft .ec-card {
+        padding: 15px;
+    }
+}
+
+.event-draft .ec-employee-day,
+.event-draft .ec-shift-row {
+    border: 1px solid #d9dadd;
+    border-radius: 10px;
+    padding: 18px;
+    margin: 15px 0;
+}
+.event-draft .ec-shift-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.event-draft .ec-shift-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px;
+}
+.event-draft .ec-shift-fields label {
+    display: block;
+    font-weight: 600;
+}
+.event-draft .ec-shift-fields .ec-checkline {
+    display: flex;
+}
+.event-draft .ec-shift-status.is-invalid {
+    color: #B42318;
+    font-weight: 600;
+}
+@media (max-width: 650px) {
+    .event-draft .ec-shift-fields {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+.event-draft .ec-shift-row.is-conflict {
+    border-color: #B42318;
+    border-left: 4px solid #B42318;
+}
+
+.event-draft .ec-validation-error {
+    color: #B42318;
+    font-weight: 600;
+}
+
+.event-draft .ec-staffing-coverage {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid #D8AD60;
+    border-left: 4px solid #B7791F;
+    border-radius: 8px;
+    background: #FFF8E8;
+    color: #694313;
+    line-height: 1.45;
+}
+.event-draft .ec-staffing-coverage[hidden] {
+    display: none !important;
+}
+.event-draft .ec-staffing-coverage p {
+    margin: 5px 0;
+}
+/* Copy Event: date-choice control matches the other full-height form fields. */
+.event-draft #ec-copy-date-mode {
+    min-height: 42px;
+    padding: 9px 12px;
+    border: 1px solid #d9dadd;
+    border-radius: 8px;
+    background-color: #fff;
+    font: inherit;
+}
+/* Safari may display an example date in a genuinely empty date input.
+   Hide only that placeholder text; a selected date stays visible. */
+.event-draft #ec-copy-end.ec-copy-end-empty:not(:focus)::-webkit-datetime-edit {
+    color: transparent;
+}
+/* Edit mode only: quiet, clearly separated audit banner. */
+.event-draft .ec-edit-history-top {
+    background: #F8F0EA;
+    border: 1px solid #EADBD2;
+    border-left: 4px solid #86616B;
+    border-radius: 10px;
+    color: #523B43;
+    font-weight: 600;
+    padding: 13px 16px;
+    margin: 10px 0 18px;
+}
+</style>
+
+<div class="event-draft">
+
+    <h1>Add Event</h1>
+    {% if event_edit_id %}
+    <p id="ec_edit_history_top" class="ec-edit-history-top" role="note" hidden></p>
+    {% endif %}
+
+    <p>
+        {% if event_edit_id %}
+            <a id="ec_back_to_calendar" href="{{ url_for('peachpos_event_calendar_month') }}">Back to Event Calendar</a>
+            {% else %}
+            {% if event_copy_id %}
+            <a href="{{ url_for('peachpos_event_calendar_month') }}">Back to Event Calendar</a>
+            {% else %}
+            <a href="{{ url_for('peachpos_event_calendar_year') }}">Back to Event Calendar</a>
+            {% endif %}
+            {% endif %}
+    </p>
+
+    <p>
+        Set up the event, operating dates, venue, equipment,
+        employee shifts, and additional information.
+    </p>
+
+    <p class="ec-note">
+        <strong>Before saving:</strong>
+        Review event details, assigned equipment, and employee shifts. Availability is checked again when you save.
+    </p>
+
+
+    {% if event_copy_id %}
+    <style>#ec-copy-custom-dates[hidden] { display: none !important; }</style>
+    <section class="ec-card" id="ec-copy-options" aria-labelledby="ec-copy-heading">
+        <h2 id="ec-copy-heading">Copy Event #{{ event_copy_id }}</h2>
+        <p class="ec-note">Choose what to bring into your new event. The original event will not be changed. Select <strong>Prepare Copy</strong> to load the new event for review.</p>
+        <div class="ec-grid" id="ec-copy-sections">
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="event_details" checked> Event name and public description</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="location" checked> Venue, location, and address</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="daily_hours" checked> Operating days and daily hours</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="equipment" checked> Trucks and equipment assignments</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="notes" checked> Event and daily notes</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="custom_fields" checked> Custom fields</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="contacts"> Event contact details</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="employees"> Employee assignments and shifts</label>
+            <label class="ec-checkline"><input type="checkbox" data-copy-section="permits"> Permits obtained</label>
+        </div>
+        <p class="ec-note">The new event starts as <strong>Scheduled</strong>, with <strong>Include on PeachWeb off</strong>. Employee shifts and permits are not copied unless you select them.</p>
+        <div class="ec-field" style="margin-top:14px;">
+            <label for="ec-copy-date-mode">New Event Dates</label>
+            <select id="ec-copy-date-mode">
+                <option value="next_week" selected>Copy to Next Week (+7 days)</option>
+                <option value="custom">Choose custom dates</option>
+            </select>
+        </div>
+        <div class="ec-grid" id="ec-copy-custom-dates" hidden>
+            <div class="ec-field">
+                <label for="ec-copy-start">New Start Date</label>
+                <input type="date" id="ec-copy-start">
+            </div>
+            <div class="ec-field">
+                <label for="ec-copy-end">New End Date (optional)</label>
+                <input type="date" id="ec-copy-end" autocomplete="off"
+                       aria-describedby="ec-copy-end-help">
+                <small class="ec-note" id="ec-copy-end-help">Leave empty to keep the original number of days.</small>
+            </div>
+            <p class="ec-note ec-wide">If you leave New End Date empty, PeachPOS calculates it from the original event's length. Any extra dates you add start as non-operating and can be configured below.</p>
+            <p class="ec-note ec-wide" id="ec-copy-calculated-end" role="status" aria-live="polite">The calculated end date will appear after Prepare Copy.</p>
+        </div>
+        <p style="margin-top:16px;">
+            <button type="button" class="btn" id="ec-prepare-copy">Prepare Copy</button>
+            <a class="btn" href="{{ url_for('peachpos_event_calendar_month') }}">Cancel Copy</a>
+        </p>
+        <p id="ec-copy-status" class="ec-note" role="status" aria-live="polite">Select your options, then Prepare Copy before reviewing and saving.</p>
+    </section>
+    {% endif %}
+
+    <section class="ec-card">
+        <h2>Event Information</h2>
+            <p class="ec-note">
+                Fields marked * are required.
+            </p>
+
+        <div class="ec-grid">
+            <div class="ec-field ec-wide">
+                <label for="event_name">Event Name <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input id="event_name" maxlength="200"
+                       placeholder="Example: Roanoke Days" required aria-required="true">
+            </div>
+
+            <div class="ec-field">
+                <label for="start_date">Start Date <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input type="date" id="start_date" required aria-required="true">
+            </div>
+
+            <div class="ec-field">
+                <label for="end_date">End Date <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input type="date" id="end_date" required aria-required="true">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="next_occurrence">Next Occurrence (Optional)</label>
+                <input type="text" id="next_occurrence" maxlength="120"
+                       autocomplete="off" placeholder="Oct 5, Oct 5-8, 10/5-8"
+                       aria-describedby="ec-next-occurrence-help">
+                <p class="ec-note" id="ec-next-occurrence-help">
+                    Anticipated date of this event's next occurrence, if known.
+                    <strong>Enter it when you know it. Update it when you learn it.</strong>
+                    This is only a reference; it does not schedule another event or reminder.
+                </p>
+            </div>
+
+            <div class="ec-field">
+                <label for="event_status">Event Status</label>
+                <select id="event_status">
+                    <option>Scheduled</option>
+                    <option>Confirmed</option>
+                    <option>Cancelled</option>
+                    <option>Completed</option>
+                </select>
+            </div>
+
+            <div class="ec-field">
+                <label>Visibility</label>
+                <label>
+                    <input type="checkbox" id="include_on_peachweb">
+                    Include on PeachWeb
+                </label>
+                <p class="ec-note">
+                    When PeachWeb event publishing is enabled, selected events will appear in the Where to Find Us listing.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="ec-card">
+        <h2>Venue & Location</h2>
+
+        <div class="ec-grid">
+            <div class="ec-field ec-wide">
+                <label for="venue_name">Venue / Location Name</label>
+                <input id="venue_name" maxlength="200">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="street_address">Street Address <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input id="street_address" maxlength="255" required aria-required="true">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="address_line2">Address Line 2</label>
+                <input id="address_line2" maxlength="255">
+            </div>
+
+            <div class="ec-field">
+                <label for="city">City <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input id="city" maxlength="120" required aria-required="true">
+            </div>
+
+            <div class="ec-field">
+                <label for="county">County</label>
+                <input id="county" maxlength="120">
+            </div>
+
+            <div class="ec-field">
+                <label for="state">State <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input id="state" maxlength="80" required aria-required="true">
+            </div>
+
+            <div class="ec-field">
+                <label for="zip_code">ZIP Code <span style="color: #c62828; font-weight: 700;" aria-hidden="true">*</span></label>
+                <input id="zip_code" maxlength="20" required aria-required="true">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="parking_setup_location">
+                    Parking Pad / Setup Location
+                </label>
+                <textarea id="parking_setup_location" rows="3"
+                    placeholder="Where should the truck or cart be positioned?"></textarea>
+            </div>
+        </div>
+    </section>
+
+    <section class="ec-card">
+        <h2>Event Contact & Permits</h2>
+
+        <div class="ec-grid">
+            <div class="ec-field">
+                <label for="contact_name">Contact Name</label>
+                <input id="contact_name" maxlength="150">
+            </div>
+
+            <div class="ec-field">
+                <label for="contact_phone">Contact Phone</label>
+                <input id="contact_phone" type="tel" maxlength="40">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="contact_email">Contact Email</label>
+                <input id="contact_email" type="email" maxlength="254">
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label>
+                    <input type="checkbox" id="permits_obtained">
+                    Required Permits Obtained
+                </label>
+            </div>
+        </div>
+    </section>
+
+    <section class="ec-card">
+        <h2>Event Custom Fields</h2>
+
+        <p class="ec-note">
+            These labels come from your business's Admin Settings.
+        </p>
+
+        <div class="ec-grid">
+            {% for slot in (1, 2, 3) %}
+            <div class="ec-field">
+                <label for="custom_{{ slot }}">
+                    {{ event_custom_labels[slot] }}
+                </label>
+                <input id="custom_{{ slot }}" type="text">
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+
+    <section class="ec-card">
+        <h2>Daily Operating Schedule</h2>
+
+        <p>
+            Choose your event's start and end dates above.
+            A separate operating schedule will be created
+            automatically for each date.
+        </p>
+
+        <div class="ec-schedule-bulk">
+            <h3>Apply the Same Hours</h3>
+
+            <p class="ec-note">
+                Set your usual hours below, then apply them
+                to every operating day. You can still adjust
+                individual dates afterward.
+            </p>
+
+            <div class="ec-grid">
+                <div class="ec-field">
+                    <label for="ec_default_open">
+                        Opening Time
+                    </label>
+                    <input id="ec_default_open"
+                           type="time" value="10:00">
+                </div>
+
+                <div class="ec-field">
+                    <label for="ec_default_close">
+                        Closing Time
+                    </label>
+                    <input id="ec_default_close"
+                           type="time" value="18:00">
+                </div>
+
+                <div class="ec-field">
+                    <label for="ec_default_setup">
+                        Setup / Arrival (optional)
+                    </label>
+                    <input id="ec_default_setup" type="time">
+                </div>
+
+                <div class="ec-field">
+                    <label for="ec_default_breakdown">
+                        Breakdown (optional)
+                    </label>
+                    <input id="ec_default_breakdown"
+                           type="time">
+                </div>
+
+                <div class="ec-field ec-wide">
+                    <label class="ec-checkline">
+                        <input id="ec_default_overnight"
+                               type="checkbox">
+                        Closes Next Day (overnight)
+                    </label>
+                </div>
+            </div>
+
+            <p>
+                <button type="button"
+                        class="btn"
+                        id="ec_apply_hours">
+                    Apply Hours to Every Operating Day
+                </button>
+            </p>
+        </div>
+
+        <h3 style="color: #B42318;">Individual Event Days</h3>
+
+        <p id="ec_schedule_message"
+           class="ec-note"
+           role="status"
+           aria-live="polite">
+            Select the event start and end dates above.
+        </p>
+
+        <div id="ec_schedule_days"></div>
+
+        <p class="ec-note">
+            Overnight closing means the closing time occurs
+            on the following calendar day. Operating times are validated by the server before saving.
+        </p>
+
+        <p class="ec-note">
+            Daily operating hours entered here are saved with the event.
+        </p>
+    </section>
+
+    <section class="ec-card">
+        <h2>Trucks, Trailers, Carts & Booths</h2>
+
+        <p>
+            Assign one or more available units to each
+            operating day.
+        </p>
+
+        {% if available_event_units %}
+
+        <div class="ec-equipment-bulk">
+            <h3>Apply Equipment to Multiple Days</h3>
+
+            <p class="ec-note">
+                Select equipment below, then apply it to
+                every operating day. Individual dates can
+                be adjusted afterward.
+            </p>
+
+            <div class="ec-equipment-choices"
+                 id="ec_equipment_bulk_choices">
+                {% for unit in available_event_units %}
+                <label class="ec-equipment-choice">
+                    <input type="checkbox"
+                           data-event-unit-id="{{ unit.event_unit_id }}">
+                    <span>
+                        <strong>{{ unit.unit_name }}</strong>
+                        <small>{{ unit.unit_type|title }}</small>
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+
+            <p>
+                <button type="button"
+                        class="btn"
+                        id="ec_apply_equipment">
+                    Apply Selected Equipment to All Operating Days
+                </button>
+            </p>
+        </div>
+
+        {% else %}
+
+        <p>
+            No active equipment is registered in this workspace.
+            Add equipment before scheduling units for events.
+        </p>
+
+        {% endif %}
+
+        <h3>Equipment by Event Day</h3>
+
+        <p id="ec_equipment_message"
+           class="ec-note"
+           role="status"
+           aria-live="polite">
+            Select event dates to assign equipment.
+        </p>
+
+        <div id="ec_equipment_days"></div>
+
+        <template id="ec_equipment_choice_template">
+            <div class="ec-equipment-choices">
+                {% for unit in available_event_units %}
+                <label class="ec-equipment-choice">
+                    <input type="checkbox"
+                           data-event-unit-id="{{ unit.event_unit_id }}">
+                    <span>
+                        <strong>{{ unit.unit_name }}</strong>
+                        <small>{{ unit.unit_type|title }}</small>
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+        </template>
+
+        <p class="ec-note">
+            Existing reservations and scheduling conflicts are checked before an event is saved.
+        </p>
+    </section>
+
+    <section class="ec-card">
+        <h2>Employee Scheduling</h2>
+
+        <p>
+            Assign employees from your existing
+            Peach Suite Pro Employee Management records.
+        </p>
+
+        {% if available_event_employees %}
+
+        <details>
+            <summary style="cursor:pointer; font-weight:600;">
+                Available Employees in This Workspace
+                ({{ available_event_employees|length }})
+            </summary>
+
+            <div style="padding:12px 0;">
+                <ul>
+                    {% for employee in available_event_employees %}
+                    <li>{{ employee.display_name }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </details>
+
+
+        <h3 style="margin-top:24px;">Employee Shifts by Day</h3>
+
+        <p class="ec-note">
+            Add one or more shifts for each operating day.
+        </p>
+
+        <p id="ec_employee_message"
+           class="ec-note" role="status" aria-live="polite">
+            Select event dates to schedule employees.
+        </p>
+
+        <div id="ec_employee_days"></div>
+
+        <template id="ec_employee_shift_template">
+            <div class="ec-shift-row">
+                <div class="ec-shift-heading">
+                    <strong class="ec-shift-title"></strong>
+                    <button type="button" class="btn"
+                            data-shift-action="remove">
+                        Remove Shift
+                    </button>
+                </div>
+
+                <div class="ec-shift-fields">
+                    <label class="ec-field">
+                        Employee
+                        <select data-shift-field="employeeId">
+                            <option value="">Choose Employee</option>
+                            {% for employee in available_event_employees %}
+                            <option value="{{ employee.employee_id }}">
+                                {{ employee.display_name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </label>
+
+                    <label class="ec-field">
+                        Shift Start
+                        <input type="time"
+                               data-shift-field="start">
+                    </label>
+
+                    <label class="ec-field">
+                        Shift End
+                        <input type="time"
+                               data-shift-field="end">
+                    </label>
+
+                    <label class="ec-field">
+                        Assigned Equipment (optional)
+                        <select data-shift-field="unitId">
+                            <option value="">No specific equipment</option>
+                        </select>
+                    </label>
+
+                    <label class="ec-checkline ec-wide">
+                        <input type="checkbox"
+                               data-shift-field="overnight">
+                        Shift Ends Next Day
+                    </label>
+
+                    <label class="ec-field">
+                        Shift Role (optional)
+                        <input type="text" maxlength="100"
+                               data-shift-field="role">
+                    </label>
+
+                    <label class="ec-field ec-wide">
+                        Shift Notes (optional)
+                        <textarea rows="2"
+                                  data-shift-field="notes"></textarea>
+                    </label>
+                </div>
+
+                <p class="ec-shift-status" role="status"></p>
+            </div>
+        </template>
+
+        {% else %}
+
+        <p class="ec-note">
+            No active employees are currently assigned to
+            this workspace. Add or assign employees through
+            Employee Management to make them available here.
+        </p>
+
+        {% endif %}
+
+        <p class="ec-note">
+            Use Review Event Details to check equipment and employee conflicts. Availability is checked again when you save.
+        </p>
+
+        <p class="ec-note">
+            Employee scheduling does not automatically
+            create payroll hours, earnings, or payments.
+        </p>
+    </section>
+
+    <section class="ec-card">
+        <h2>Descriptions & Notes</h2>
+
+        <div class="ec-grid">
+            <div class="ec-field ec-wide">
+                <label for="public_description">
+                    Public Event Description
+                </label>
+                <textarea id="public_description" rows="3"></textarea>
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="notes_1">Notes 1 — Setup & Logistics</label>
+                <textarea id="notes_1" rows="3"></textarea>
+            </div>
+
+            <div class="ec-field ec-wide">
+                <label for="notes_2">Notes 2 — Internal Team Notes</label>
+                <textarea id="notes_2" rows="3"></textarea>
+                <a href="{{ url_for('admin') }}#event-custom-fields">Manage Event Custom Fields</a>
+            </div>
+        </div>
+    </section>
+
+    <p class="ec-note">
+        {% if event_edit_id %}
+            Save Changes updates this existing event, including its operating hours, equipment, and employee shifts. Availability is checked before saving.
+            {% else %}
+            Save Event records event details, daily operating hours, assigned equipment, and employee shifts. Availability is checked before saving.
+            {% endif %}
+    </p>
+
+
+    <p class="ec-note">
+        <strong>Step 1 — Review Your Event</strong>
+        Review required information, operating hours,
+        truck assignments, and employee shifts before saving.
+        The server will check scheduling availability.
+    </p>
+
+    <p style="margin-top:15px;">
+        <button type="button"
+                class="btn"
+                id="ec_preview_payload">
+            Review Event Details
+        </button>
+    </p>
+
+    <p id="ec_payload_summary"
+       class="ec-note"
+       role="status"
+       aria-live="polite">
+        Complete the required fields, review your event, then select {{ 'Save Changes' if event_edit_id else 'Save Event' }}.
+    </p>
+
+    <p class="ec-note">
+        {% if event_edit_id %}
+            <strong>Step 2 — Save Your Changes</strong>
+            {% else %}
+            <strong>Step 2 — Save Your Event</strong>
+            {% endif %}
+        When the review looks correct, select {{ 'Save Changes' if event_edit_id else 'Save Event' }}.
+        Availability will be checked again before saving.
+    </p>
+
+    {% if event_edit_id %}
+    <section class="ec-card" id="ec-edit-mode-panel">
+        <h2>Edit Event #{{ event_edit_id }}</h2>
+        <p id="ec_edit_status" role="status" aria-live="polite">
+            Loading your saved event...
+        </p>
+        <p class="ec-note">
+            Multiple administrators can review this event at once.
+            If someone saves a newer version first, your save will be
+            rejected without overwriting their changes.
+        </p>
+        <button type="button" class="btn"
+                id="ec_cancel_edit">Cancel Editing</button>
+    </section>
+    {% endif %}
+
+    <form id="ec_event_transport"
+          method="POST"
+          action="{% if event_edit_id %}#{% else %}{{ url_for('save_peachpos_event') }}{% endif %}">
+
+        <input type="hidden"
+               name="security_csrf_token"
+               value="{{ event_csrf_token }}">
+
+        <input type="hidden"
+               id="ec_event_payload"
+               name="event_payload">
+
+        <input type="hidden"
+               id="ec_submission_token"
+               name="submission_token">
+
+        <button class="btn"
+                type="submit"
+                id="ec_save_event"
+                  {% if event_edit_id %}disabled{% endif %}{% if event_copy_id %}disabled{% endif %}>
+            {{ 'Save Changes' if event_edit_id else 'Save Event' }}
+        </button>
+    </form>
+
+    <p id="ec_new_event_link" hidden>
+        <a class="btn" id="ec_return_to_calendar_after_save"
+           href="{{ url_for('peachpos_event_calendar_month') }}">
+            Return to Event Calendar
+        </a>
+        <a href="{{ url_for('event_new') }}" style="margin-left: 12px;">
+            Create Another Event
+        </a>
+    </p>
+
+
+
+
+<script>
+(function () {
+    "use strict";
+
+    const editEventId = {{ event_edit_id | tojson }};
+    const isEditMode = Number.isSafeInteger(editEventId) && editEventId > 0;
+    const copyEventId = {{ event_copy_id | tojson }};
+    const isCopyMode = Number.isSafeInteger(copyEventId) && copyEventId > 0;
+
+    const startInput = document.getElementById("start_date");
+    const endInput = document.getElementById("end_date");
+    const daysContainer = document.getElementById("ec_schedule_days");
+    const message = document.getElementById("ec_schedule_message");
+
+    const bulkOpen = document.getElementById("ec_default_open");
+    const bulkClose = document.getElementById("ec_default_close");
+    const bulkSetup = document.getElementById("ec_default_setup");
+    const bulkBreakdown =
+        document.getElementById("ec_default_breakdown");
+    const bulkOvernight =
+        document.getElementById("ec_default_overnight");
+    const applyButton = document.getElementById("ec_apply_hours");
+
+    if (!startInput || !endInput || !daysContainer ||
+        !message || !applyButton) {
+        return;
+    }
+
+    const equipmentDays =
+        document.getElementById("ec_equipment_days");
+    const equipmentMessage =
+        document.getElementById("ec_equipment_message");
+    const equipmentTemplate =
+        document.getElementById("ec_equipment_choice_template");
+    const applyEquipment =
+        document.getElementById("ec_apply_equipment");
+    const bulkEquipment =
+        document.getElementById("ec_equipment_bulk_choices");
+
+    const employeeDays =
+        document.getElementById("ec_employee_days");
+    const employeeMessage =
+        document.getElementById("ec_employee_message");
+    const shiftTemplate =
+        document.getElementById("ec_employee_shift_template");
+
+    const dailyValues = new Map();
+    const DAY_MS = 86400000;
+    const MAX_PREVIEW_DAYS = 366;
+
+    const dateFormatter = new Intl.DateTimeFormat(undefined, {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC"
+    });
+
+    function parseDate(value) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+            return null;
+        }
+
+        const date = new Date(value + "T00:00:00Z");
+
+        if (
+            Number.isNaN(date.getTime()) ||
+            date.toISOString().slice(0, 10) !== value
+        ) {
+            return null;
+        }
+
+        return date;
+    }
+
+    function timeMinutes(value) {
+        if (!/^\d{2}:\d{2}$/.test(value)) {
+            return null;
+        }
+
+        const parts = value.split(":").map(Number);
+
+        if (
+            parts[0] > 23 ||
+            parts[1] > 59
+        ) {
+            return null;
+        }
+
+        return parts[0] * 60 + parts[1];
+    }
+
+    function bulkValues() {
+        return {
+            open: bulkOpen.value,
+            close: bulkClose.value,
+            setup: bulkSetup.value,
+            breakdown: bulkBreakdown.value,
+            overnight: bulkOvernight.checked
+        };
+    }
+
+    function newDayValues() {
+        return Object.assign({
+            operating: true,
+            notes: "",
+            equipmentIds: [],
+            shifts: []
+        }, bulkValues());
+    }
+
+    function makeTimeField(dateKey, fieldKey, labelText, value) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "ec-field";
+
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+
+        const id = "ec_" + fieldKey + "_" + dateKey;
+
+        label.htmlFor = id;
+        label.textContent = labelText;
+
+        input.type = "time";
+        input.id = id;
+        input.value = value || "";
+        input.dataset.field = fieldKey;
+
+        wrapper.append(label, input);
+        return wrapper;
+    }
+
+    function makeCheckbox(fieldKey, labelText, checked) {
+        const label = document.createElement("label");
+        label.className = "ec-checkline";
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.dataset.field = fieldKey;
+        input.checked = Boolean(checked);
+
+        const text = document.createElement("span");
+        text.textContent = labelText;
+
+        label.append(input, text);
+        return label;
+    }
+
+    function updateStatus(row, values) {
+        const status = row.querySelector(".ec-day-status");
+        status.classList.remove("is-invalid");
+
+        if (!values.operating) {
+            status.textContent = "No operation scheduled on this date.";
+            return;
+        }
+
+        const open = timeMinutes(values.open);
+        const close = timeMinutes(values.close);
+
+        if (open === null || close === null) {
+            status.textContent = "Enter opening and closing times.";
+            status.classList.add("is-invalid");
+            return;
+        }
+
+        const closingMinute =
+            close + (values.overnight ? 1440 : 0);
+
+        const duration = closingMinute - open;
+
+        if (duration <= 0) {
+            status.textContent =
+                "Closing must be after opening. " +
+                "Select 'Closes Next Day' for overnight hours.";
+            status.classList.add("is-invalid");
+            return;
+        }
+
+        if (duration > 1440) {
+            status.textContent =
+                "This schedule exceeds 24 hours. Please review " +
+                "the opening, closing, and overnight settings.";
+            status.classList.add("is-invalid");
+            return;
+        }
+
+        const hours = Math.floor(duration / 60);
+        const minutes = duration % 60;
+
+        status.textContent =
+            "Operating duration: " +
+            hours + " hr" +
+            (minutes ? " " + minutes + " min" : "") +
+            (values.overnight ? " (closes next day)" : "") +
+            ".";
+    }
+
+    function createDayRow(date, dateKey, values) {
+        const row = document.createElement("div");
+        row.className = "ec-day-row";
+        row.dataset.date = dateKey;
+
+        const heading = document.createElement("div");
+        heading.className = "ec-day-heading";
+
+        const title = document.createElement("h3");
+        title.textContent = dateFormatter.format(date);
+
+        heading.append(
+            title,
+            makeCheckbox(
+                "operating",
+                "Operating This Day",
+                values.operating
+            )
+        );
+
+        const fields = document.createElement("div");
+        fields.className = "ec-day-fields";
+
+        fields.append(
+            makeTimeField(
+                dateKey, "open", "Opening Time", values.open
+            ),
+            makeTimeField(
+                dateKey, "close", "Closing Time", values.close
+            ),
+            makeTimeField(
+                dateKey, "setup",
+                "Setup / Arrival (optional)",
+                values.setup
+            ),
+            makeTimeField(
+                dateKey, "breakdown",
+                "Breakdown (optional)",
+                values.breakdown
+            )
+        );
+
+        const overnightWrap = document.createElement("div");
+        overnightWrap.className = "ec-wide";
+
+        overnightWrap.append(
+            makeCheckbox(
+                "overnight",
+                "Closes Next Day (overnight)",
+                values.overnight
+            )
+        );
+
+        fields.append(overnightWrap);
+
+        const notesWrap = document.createElement("div");
+        notesWrap.className = "ec-field ec-wide";
+
+        const notesLabel = document.createElement("label");
+        notesLabel.textContent = "Daily Notes (optional)";
+        notesLabel.htmlFor = "ec_notes_" + dateKey;
+
+        const notes = document.createElement("textarea");
+        notes.id = notesLabel.htmlFor;
+        notes.rows = 2;
+        notes.dataset.field = "notes";
+        notes.value = values.notes || "";
+
+        notesWrap.append(notesLabel, notes);
+        fields.append(notesWrap);
+
+        const status = document.createElement("p");
+        status.className = "ec-day-status";
+        status.setAttribute("aria-live", "polite");
+
+        row.append(heading, fields, status);
+
+        row.classList.toggle("is-closed", !values.operating);
+
+        fields.querySelectorAll("input, textarea").forEach(
+            function (control) {
+                control.disabled = !values.operating;
+            }
+        );
+
+        updateStatus(row, values);
+
+        return row;
+    }
+
+
+    function renderEquipmentDays() {
+        equipmentDays.replaceChildren();
+
+        const visibleDays =
+            daysContainer.querySelectorAll(".ec-day-row");
+
+        if (!visibleDays.length) {
+            equipmentMessage.textContent =
+                "Choose valid event dates above to assign equipment.";
+            return;
+        }
+
+        const hasEquipment = equipmentTemplate.content
+            .querySelector("input[data-event-unit-id]");
+
+        if (!hasEquipment) {
+            equipmentMessage.textContent =
+                "No active equipment is available for assignment.";
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        for (const dayRow of visibleDays) {
+            const dateKey = dayRow.dataset.date;
+            const values = dailyValues.get(dateKey);
+
+            if (!values) continue;
+
+            const card = document.createElement("div");
+            card.className = "ec-equipment-day";
+            card.dataset.date = dateKey;
+            card.classList.toggle(
+                "is-closed", !values.operating
+            );
+
+            const heading = document.createElement("h4");
+            heading.textContent = dateFormatter.format(
+                new Date(dateKey + "T00:00:00Z")
+            );
+
+            card.append(heading);
+
+            if (!values.operating) {
+                const note = document.createElement("p");
+                note.className = "ec-note";
+                note.textContent =
+                    "Non-operating day — no equipment scheduled.";
+                card.append(note);
+            } else {
+                const choices =
+                    equipmentTemplate.content.cloneNode(true);
+
+                choices.querySelectorAll(
+                    "input[data-event-unit-id]"
+                ).forEach(function (input) {
+                    input.checked = values.equipmentIds.includes(
+                        input.dataset.eventUnitId
+                    );
+                });
+
+                card.append(choices);
+            }
+
+            fragment.append(card);
+        }
+
+        equipmentDays.append(fragment);
+
+        equipmentMessage.textContent =
+            "Select equipment for individual operating days, " +
+            "or apply a common selection above.";
+    }
+
+
+    function showShiftStatus(row, shift, day, hasConflict = false) {
+        const status = row.querySelector(".ec-shift-status");
+        const start = timeMinutes(shift.start);
+        const end = timeMinutes(shift.end);
+        let error = "";
+
+        if (!shift.employeeId) {
+            error = "Select an employee.";
+        } else if (start === null || end === null) {
+            error = "Enter both shift times.";
+        } else {
+            const duration =
+                end + (shift.overnight ? 1440 : 0) - start;
+
+            if (duration <= 0 || duration > 1440) {
+                error = "Review shift hours and overnight setting.";
+            }
+        }
+
+        if (
+            !error && shift.unitId &&
+            !day.equipmentIds.includes(shift.unitId)
+        ) {
+            error = "Equipment is not selected for this day.";
+        }
+
+        if (!error && hasConflict) {
+            error =
+                "Scheduling conflict: This employee has an " +
+                "overlapping shift in this event.";
+        }
+
+        status.textContent = error ||
+            "Shift entered. No overlap within this event preview.";
+
+        status.classList.toggle("is-invalid", Boolean(error));
+        row.classList.toggle("is-conflict", Boolean(hasConflict));
+    }
+
+
+    function refreshEmployeeConflicts() {
+        if (!employeeDays || !employeeMessage) return;
+
+        const byEmployee = new Map();
+        const visibleShifts = new Map();
+
+        for (const card of employeeDays.querySelectorAll(
+            ".ec-employee-day"
+        )) {
+            const dateKey = card.dataset.date;
+            const day = dailyValues.get(dateKey);
+            const date = parseDate(dateKey);
+
+            if (!day || !day.operating || !date) continue;
+
+            for (const row of card.querySelectorAll(
+                ".ec-shift-row"
+            )) {
+                const index = Number(row.dataset.index);
+
+                if (!Number.isInteger(index)) continue;
+
+                const shift = day.shifts[index];
+                if (!shift) continue;
+
+                const key = dateKey + ":" + index;
+
+                visibleShifts.set(key, {
+                    row: row,
+                    shift: shift,
+                    day: day
+                });
+
+                if (!shift.employeeId) continue;
+
+                const startMinute = timeMinutes(shift.start);
+                const endMinute = timeMinutes(shift.end);
+
+                if (
+                    startMinute === null ||
+                    endMinute === null
+                ) continue;
+
+                const duration =
+                    endMinute +
+                    (shift.overnight ? 1440 : 0) -
+                    startMinute;
+
+                if (duration <= 0 || duration > 1440) {
+                    continue;
+                }
+
+                const start =
+                    date.getTime() + startMinute * 60000;
+
+                const end = start + duration * 60000;
+
+                if (!byEmployee.has(shift.employeeId)) {
+                    byEmployee.set(shift.employeeId, []);
+                }
+
+                byEmployee.get(shift.employeeId).push({
+                    key: key,
+                    start: start,
+                    end: end
+                });
+            }
+        }
+
+        const conflicts = new Set();
+
+        for (const shifts of byEmployee.values()) {
+            shifts.sort(function (a, b) {
+                return a.start - b.start;
+            });
+
+            for (let i = 0; i < shifts.length; i++) {
+                for (
+                    let j = i + 1;
+                    j < shifts.length &&
+                    shifts[j].start < shifts[i].end;
+                    j++
+                ) {
+                    // Half-open intervals allow shifts to
+                    // end exactly when the next one starts.
+                    if (
+                        shifts[i].start < shifts[j].end &&
+                        shifts[j].start < shifts[i].end
+                    ) {
+                        conflicts.add(shifts[i].key);
+                        conflicts.add(shifts[j].key);
+                    }
+                }
+            }
+        }
+
+        for (const [key, entry] of visibleShifts) {
+            showShiftStatus(
+                entry.row,
+                entry.shift,
+                entry.day,
+                conflicts.has(key)
+            );
+        }
+
+        if (conflicts.size) {
+            employeeMessage.textContent =
+                "Scheduling conflict: " +
+                conflicts.size +
+                " shift assignment(s) overlap. " +
+                "Review the red warnings below.";
+        } else {
+            employeeMessage.textContent =
+                "No overlapping employee shifts detected " +
+                "within this event preview. Existing-event " +
+                "reservations are checked when you review the event.";
+        }
+    }
+
+    function renderEmployeeDays() {
+        if (!employeeDays || !shiftTemplate) return;
+
+        employeeDays.replaceChildren();
+
+        const visibleDays =
+            daysContainer.querySelectorAll(".ec-day-row");
+
+        if (!visibleDays.length) {
+            employeeMessage.textContent =
+                "Choose valid event dates above.";
+            return;
+        }
+
+        const equipmentNames = new Map();
+
+        equipmentTemplate.content.querySelectorAll(
+            "input[data-event-unit-id]"
+        ).forEach(function (input) {
+            const name = input.closest("label")
+                .querySelector("strong");
+
+            equipmentNames.set(
+                input.dataset.eventUnitId,
+                name ? name.textContent.trim() : "Equipment"
+            );
+        });
+
+        for (const dateRow of visibleDays) {
+            const dateKey = dateRow.dataset.date;
+            const day = dailyValues.get(dateKey);
+            if (!day) continue;
+
+            const card = document.createElement("div");
+            card.className = "ec-employee-day";
+            card.dataset.date = dateKey;
+
+            const heading = document.createElement("h4");
+            heading.textContent = dateFormatter.format(
+                new Date(dateKey + "T00:00:00Z")
+            );
+            card.append(heading);
+
+            if (!day.operating) {
+                const note = document.createElement("p");
+                note.textContent =
+                    "Non-operating day — shifts inactive.";
+                note.className = "ec-note";
+                card.append(note);
+                employeeDays.append(card);
+                continue;
+            }
+
+            if (!day.shifts.length) {
+                const empty = document.createElement("p");
+                empty.className = "ec-note";
+                empty.textContent =
+                    "No employee shifts assigned.";
+                card.append(empty);
+            }
+
+            day.shifts.forEach(function (shift, index) {
+                const row = shiftTemplate.content
+                    .firstElementChild.cloneNode(true);
+
+                row.dataset.index = String(index);
+
+                row.querySelector(".ec-shift-title")
+                    .textContent = "Shift " + (index + 1);
+
+                const equipmentSelect = row.querySelector(
+                    '[data-shift-field="unitId"]'
+                );
+
+                for (const id of day.equipmentIds) {
+                    const option = document.createElement("option");
+                    option.value = id;
+                    option.textContent =
+                        equipmentNames.get(id) || "Equipment";
+                    equipmentSelect.append(option);
+                }
+
+                if (
+                    shift.unitId &&
+                    !day.equipmentIds.includes(shift.unitId)
+                ) {
+                    const missing = document.createElement("option");
+                    missing.value = shift.unitId;
+                    missing.textContent =
+                        "Previously selected equipment — unavailable";
+                    equipmentSelect.append(missing);
+                }
+
+                row.querySelectorAll("[data-shift-field]")
+                    .forEach(function (input) {
+                        const key = input.dataset.shiftField;
+
+                        if (input.type === "checkbox") {
+                            input.checked = Boolean(shift[key]);
+                        } else {
+                            input.value = shift[key] || "";
+                        }
+                    });
+
+                showShiftStatus(row, shift, day);
+                card.append(row);
+            });
+
+            const add = document.createElement("button");
+            add.type = "button";
+            add.className = "btn";
+            add.textContent = "Add Employee Shift";
+            add.dataset.shiftAction = "add";
+
+            card.append(add);
+
+            const coverageNotice = document.createElement("div");
+            coverageNotice.className = "ec-staffing-coverage";
+            coverageNotice.hidden = true;
+            coverageNotice.setAttribute("role", "status");
+            card.append(coverageNotice);
+
+            employeeDays.append(card);
+        }
+
+        refreshEmployeeConflicts();
+    }
+
+    function renderDays() {
+        daysContainer.replaceChildren();
+
+        if (employeeDays) {
+            employeeDays.replaceChildren();
+        }
+        equipmentDays.replaceChildren();
+        equipmentMessage.textContent =
+            "Choose valid event dates above to assign equipment.";
+
+        const start = parseDate(startInput.value);
+        const end = parseDate(endInput.value);
+
+        if (!start || !end) {
+            message.textContent =
+                "Select both the start and end dates to " +
+                "generate the operating schedule.";
+            return;
+        }
+
+        const count =
+            Math.round(
+                (end.getTime() - start.getTime()) / DAY_MS
+            ) + 1;
+
+        if (count <= 0) {
+            message.textContent =
+                "End Date must be the same as or later " +
+                "than Start Date.";
+            return;
+        }
+
+        if (count > MAX_PREVIEW_DAYS) {
+            message.textContent =
+                "This preview supports up to 366 calendar days. " +
+                "Choose a shorter range for now.";
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        for (let i = 0; i < count; i++) {
+            const day = new Date(start.getTime() + i * DAY_MS);
+            const key = day.toISOString().slice(0, 10);
+
+            if (!dailyValues.has(key)) {
+                dailyValues.set(key, newDayValues());
+            }
+
+            fragment.append(
+                createDayRow(day, key, dailyValues.get(key))
+            );
+        }
+
+        daysContainer.append(fragment);
+
+        message.textContent =
+            count + " event day" +
+            (count === 1 ? "" : "s") +
+            " generated. Customize each date as needed.";
+
+        renderEquipmentDays();
+        renderEmployeeDays();
+    }
+
+    function updateDayFromInput(event) {
+        const input = event.target;
+        const row = input.closest(".ec-day-row");
+
+        if (!row || !input.dataset.field) {
+            return;
+        }
+
+        const values = dailyValues.get(row.dataset.date);
+
+        if (!values) {
+            return;
+        }
+
+        const field = input.dataset.field;
+
+        values[field] =
+            input.type === "checkbox"
+                ? input.checked
+                : input.value;
+
+        if (field === "operating") {
+            row.classList.toggle("is-closed", !values.operating);
+
+            row.querySelectorAll(
+                ".ec-day-fields input, .ec-day-fields textarea"
+            ).forEach(function (control) {
+                control.disabled = !values.operating;
+            });
+        }
+
+        updateStatus(row, values);
+
+        if (field === "operating") {
+            renderEquipmentDays();
+            renderEmployeeDays();
+        }
+    }
+
+    equipmentDays.addEventListener("change", function (event) {
+        const input = event.target;
+        const card = input.closest(".ec-equipment-day");
+
+        if (
+            !card ||
+            !input.matches("input[data-event-unit-id]")
+        ) {
+            return;
+        }
+
+        const values = dailyValues.get(card.dataset.date);
+
+        if (!values || !values.operating) {
+            return;
+        }
+
+        const unitId = input.dataset.eventUnitId;
+        const selected = new Set(values.equipmentIds);
+
+        if (input.checked) {
+            selected.add(unitId);
+        } else {
+            selected.delete(unitId);
+        }
+
+        values.equipmentIds = Array.from(selected);
+        renderEmployeeDays();
+    });
+
+    if (applyEquipment && bulkEquipment) {
+        applyEquipment.addEventListener("click", function () {
+            const selected = Array.from(
+                bulkEquipment.querySelectorAll(
+                    "input[data-event-unit-id]:checked"
+                ),
+                input => input.dataset.eventUnitId
+            );
+
+            for (const row of daysContainer.querySelectorAll(
+                ".ec-day-row"
+            )) {
+                const values = dailyValues.get(row.dataset.date);
+
+                if (values && values.operating) {
+                    values.equipmentIds = selected.slice();
+                }
+            }
+
+            renderEquipmentDays();
+            renderEmployeeDays();
+        });
+    }
+
+
+    if (employeeDays) {
+        employeeDays.addEventListener("click", function (event) {
+            const button = event.target.closest(
+                "button[data-shift-action]"
+            );
+            if (!button) return;
+
+            const card = button.closest(".ec-employee-day");
+            const day = card && dailyValues.get(card.dataset.date);
+            if (!day || !day.operating) return;
+
+            if (button.dataset.shiftAction === "add") {
+                day.shifts.push({
+                    employeeId: "",
+                    start: day.open || "09:00",
+                    end: day.close || "17:00",
+                    overnight: Boolean(day.overnight),
+                    unitId: "",
+                    role: "",
+                    notes: ""
+                });
+            } else if (button.dataset.shiftAction === "remove") {
+                const row = button.closest(".ec-shift-row");
+                if (!row) return;
+
+                const index = Number(row.dataset.index);
+
+                if (
+                    !Number.isInteger(index) ||
+                    index < 0 ||
+                    index >= day.shifts.length
+                ) return;
+
+                day.shifts.splice(index, 1);
+            }
+
+            renderEmployeeDays();
+        });
+
+        function updateShift(event) {
+            const input = event.target;
+            const row = input.closest(".ec-shift-row");
+
+            if (!row || !input.dataset.shiftField) return;
+
+            const card = row.closest(".ec-employee-day");
+            const day = dailyValues.get(card.dataset.date);
+            const index = Number(row.dataset.index);
+
+            if (!day || !day.shifts[index]) return;
+
+            const shift = day.shifts[index];
+            const key = input.dataset.shiftField;
+
+            shift[key] = input.type === "checkbox"
+                ? input.checked
+                : input.value;
+
+            refreshEmployeeConflicts();
+        }
+
+        employeeDays.addEventListener("input", updateShift);
+        employeeDays.addEventListener("change", updateShift);
+    }
+
+    startInput.addEventListener("change", renderDays);
+    endInput.addEventListener("change", renderDays);
+
+
+
+    // EC-063: Copy Event is a NEW event. Never submit to Edit Event.
+    let copyDraftReady = false;
+    if (isCopyMode) {
+        window.addEventListener("load", function () {
+            const panel = document.getElementById("ec-copy-options");
+            const prepare = document.getElementById("ec-prepare-copy");
+            const status = document.getElementById("ec-copy-status");
+            const dateMode = document.getElementById("ec-copy-date-mode");
+            const customDates = document.getElementById("ec-copy-custom-dates");
+            const copyStart = document.getElementById("ec-copy-start");
+            const copyEnd = document.getElementById("ec-copy-end");
+            const calculatedEnd = document.getElementById("ec-copy-calculated-end");
+            const save = document.getElementById("ec_save_event");
+            const preview = document.getElementById("ec_preview_payload");
+            const csrf = document.querySelector(
+                '#ec_event_transport input[name="security_csrf_token"]'
+            );
+            const heading = document.querySelector(".event-draft h1");
+            if (heading) heading.textContent = "Copy Event #" + copyEventId;
+            if (save) {
+                save.disabled = true;
+                save.textContent = "Save as New Event";
+            }
+            if (preview) preview.disabled = true;
+            if (!panel || !prepare || !status || !save || !preview ||
+                !dateMode || !csrf || !csrf.value || !customDates ||
+                !copyStart || !copyEnd || !calculatedEnd) {
+                return;
+            }
+            function syncEmptyEndField() {
+                copyEnd.classList.toggle("ec-copy-end-empty", !copyEnd.value);
+            }
+            syncEmptyEndField();
+            copyEnd.addEventListener("input", syncEmptyEndField);
+            copyEnd.addEventListener("change", syncEmptyEndField);
+            function invalidateCopy() {
+                copyDraftReady = false;
+                save.disabled = true;
+                preview.disabled = true;
+                calculatedEnd.textContent =
+                    "The calculated end date will appear after Prepare Copy.";
+                status.textContent = "Copy options changed. Select Prepare Copy again to apply them.";
+            }
+            dateMode.addEventListener("change", function () {
+                customDates.hidden = dateMode.value !== "custom";
+                invalidateCopy();
+            });
+            panel.querySelectorAll('input[data-copy-section], input[type="date"]')
+                .forEach(function (control) {
+                    control.addEventListener("change", invalidateCopy);
+                });
+
+            prepare.addEventListener("click", async function () {
+                if (copyDraftReady && !window.confirm(
+                    "Prepare the copy again? This replaces your current form edits."
+                )) return;
+                copyDraftReady = false;
+                prepare.disabled = true;
+                save.disabled = true;
+                preview.disabled = true;
+                status.textContent = "Preparing a new event from the saved event...";
+                try {
+                    const sections = {};
+                    panel.querySelectorAll("input[data-copy-section]")
+                        .forEach(function (control) {
+                            sections[control.dataset.copySection] = control.checked;
+                        });
+                    const options = {sections: sections};
+                    if (dateMode.value === "custom") {
+                        if (!parseDate(copyStart.value)) {
+                            throw new Error("Select a valid new start date.");
+                        }
+                        options.target_start_date = copyStart.value;
+                        if (copyEnd.value) {
+                            if (!parseDate(copyEnd.value)) {
+                                throw new Error("Select a valid new end date.");
+                            }
+                            options.target_end_date = copyEnd.value;
+                        }
+                    } else if (dateMode.value !== "next_week") {
+                        throw new Error("Invalid date selection.");
+                    }
+                    const body = new FormData();
+                    body.append("security_csrf_token", csrf.value);
+                    body.append("copy_options", JSON.stringify(options));
+                    const response = await fetch(
+                        "/events/" + copyEventId + "/copy-draft", {
+                            method: "POST", credentials: "same-origin",
+                            cache: "no-store",
+                            headers: {"Accept": "application/json"}, body: body
+                        }
+                    );
+                    if (!(response.headers.get("content-type") || "")
+                        .includes("application/json")) {
+                        throw new Error("Copy request could not be verified. Please sign in again.");
+                    }
+                    const result = await response.json();
+                    if (!response.ok || result.ok !== true) {
+                        throw new Error(typeof result.error === "string" && result.error
+                            ? result.error : "Unable to prepare this event copy.");
+                    }
+                    const draft = result.draft;
+                    if (result.source_event_id !== copyEventId ||
+                        result.saved !== false || !draft || draft.event_id != null ||
+                        !draft.event || !Array.isArray(draft.days) ||
+                        !parseDate(draft.event.start_date) ||
+                        !parseDate(draft.event.end_date)) {
+                        throw new Error("Invalid Copy Event draft. Nothing was changed.");
+                    }
+                    const availableUnitIds = new Set(
+                        Array.from(equipmentTemplate.content.querySelectorAll(
+                            "input[data-event-unit-id]"
+                        ), input => String(input.dataset.eventUnitId))
+                    );
+                    const availableEmployeeIds = new Set(
+                        Array.from(shiftTemplate.content.querySelectorAll(
+                            '[data-shift-field="employeeId"] option'
+                        ), option => String(option.value)).filter(Boolean)
+                    );
+                    const prepared = new Map();
+                    for (const day of draft.days) {
+                        if (!parseDate(day.date) || prepared.has(day.date) ||
+                            !Array.isArray(day.equipment_ids) ||
+                            !Array.isArray(day.shifts)) {
+                            throw new Error("Invalid operating-day information in copy.");
+                        }
+                        const equipmentIds = day.equipment_ids.map(String);
+                        if (equipmentIds.some(id => !availableUnitIds.has(id))) {
+                            throw new Error("Copied equipment is no longer available. Uncheck equipment and Prepare Copy again.");
+                        }
+                        const shifts = day.shifts.map(function (shift) {
+                            const employeeId = String(shift.employee_id);
+                            const unitId = shift.equipment_id == null
+                                ? "" : String(shift.equipment_id);
+                            if (!availableEmployeeIds.has(employeeId) ||
+                                (unitId && !equipmentIds.includes(unitId))) {
+                                throw new Error("A copied employee or assignment is unavailable. Uncheck employees and Prepare Copy again.");
+                            }
+                            return {
+                                employeeId, start: shift.starts || "",
+                                end: shift.ends || "",
+                                overnight: Boolean(shift.ends_next_day),
+                                unitId, role: shift.role || "", notes: shift.notes || ""
+                            };
+                        });
+                        prepared.set(day.date, {
+                            operating: Boolean(day.operating),
+                            open: day.opens || "", close: day.closes || "",
+                            setup: day.setup || "", breakdown: day.breakdown || "",
+                            overnight: Boolean(day.closes_next_day),
+                            notes: day.notes || "", equipmentIds, shifts
+                        });
+                    }
+                    const eventData = draft.event;
+                    const fields = {
+                        event_name: eventData.name,
+                        start_date: eventData.start_date,
+                        end_date: eventData.end_date,
+                        next_occurrence: "",
+                        venue_name: eventData.venue_name,
+                        street_address: eventData.street_address,
+                        address_line2: eventData.address_line2,
+                        city: eventData.city, county: eventData.county,
+                        state: eventData.state, zip_code: eventData.zip_code,
+                        parking_setup_location: eventData.parking_setup_location,
+                        contact_name: eventData.contact_name,
+                        contact_phone: eventData.contact_phone,
+                        contact_email: eventData.contact_email,
+                        public_description: eventData.public_description,
+                        notes_1: eventData.notes_1, notes_2: eventData.notes_2
+                    };
+                    for (const [id, value] of Object.entries(fields)) {
+                        const field = document.getElementById(id);
+                        if (!field) throw new Error("A required Copy Event form field is missing.");
+                        field.value = value == null ? "" : String(value);
+                    }
+                    const eventStatus = document.getElementById("event_status");
+                    const scheduled = Array.from(eventStatus.options).find(
+                        option => option.value.toLowerCase() === "scheduled"
+                    );
+                    if (!scheduled) throw new Error("Scheduled status unavailable.");
+                    eventStatus.value = scheduled.value;
+                    document.getElementById("include_on_peachweb").checked = false;
+                    document.getElementById("permits_obtained").checked =
+                        Boolean(eventData.permits_obtained);
+                    for (const slot of ["1", "2", "3"]) {
+                        document.getElementById("custom_" + slot).value =
+                            String((draft.custom_values || {})[slot] || "");
+                    }
+                    dailyValues.clear();
+                    for (const [date, state] of prepared) dailyValues.set(date, state);
+                    renderDays();
+                    // The server constructs the end date after shifting the original
+                    // event span, or uses the custom override if provided.
+                    // Never guess a multi-day duration from browser-local dates.
+                    const preparedEnd = parseDate(eventData.end_date);
+                    calculatedEnd.textContent = preparedEnd
+                        ? "New event ends: " + dateFormatter.format(preparedEnd) +
+                          (dateMode.value === "custom" && !copyEnd.value
+                              ? " (calculated automatically)"
+                              : " (selected copy dates)")
+                        : "Review the new event end date in Event Information.";
+                    syncEmptyEndField();
+                    // This remains Create Event: no original event ID or revision
+                    // is ever sent to the save endpoint.
+                    copyDraftReady = true;
+                    preview.disabled = false;
+                    save.disabled = false;
+                    status.textContent =
+                        "Proposed new event loaded. Review the fields and daily schedule below. " +
+                        "Select Review Event Details, then Save as New Event. " +
+                        "The original event has not changed.";
+                } catch (error) {
+                    status.textContent = error && error.message ||
+                        "Unable to prepare the copy. Nothing was saved.";
+                } finally {
+                    prepare.disabled = false;
+                }
+            });
+        });
+    }
+
+    if (isEditMode) {
+        window.addEventListener("load", async function () {
+            const status = document.getElementById("ec_edit_status");
+            const cancel = document.getElementById("ec_cancel_edit");
+            const save = document.getElementById("ec_save_event");
+            const preview = document.getElementById("ec_preview_payload");
+            const csrfInput = document.querySelector(
+                '#ec_event_transport input[name="security_csrf_token"]'
+            );
+            if (save) save.disabled = true;
+            if (preview) preview.disabled = true;
+            const heading = document.querySelector(".event-draft h1");
+            if (heading) heading.textContent = "Edit Event #" + editEventId;
+
+            // Neither Back nor Cancel requires an editing lease.
+            const backLink = document.getElementById("ec_back_to_calendar");
+            if (backLink) {
+                backLink.addEventListener("click", function (event) {
+                    event.preventDefault();
+                    window.location.assign("/events/calendar");
+                });
+            }
+            if (cancel) {
+                cancel.addEventListener("click", function () {
+                    window.location.assign("/events/calendar");
+                });
+            }
+            if (!csrfInput || !csrfInput.value) {
+                status.textContent = "Security token unavailable. Reopen Edit Event.";
+                return;
+            }
+            try {
+                const body = new FormData();
+                body.append("security_csrf_token", csrfInput.value);
+                const response = await fetch(
+                    "/events/" + editEventId + "/edit-draft", {
+                        method: "POST", credentials: "same-origin",
+                        cache: "no-store", headers: {"Accept": "application/json"},
+                        body: body
+                    }
+                );
+                if (!response.ok) throw new Error("Edit data rejected.");
+                const result = await response.json();
+                const draft = result && result.event;
+                if (result.ok !== true || !draft ||
+                    draft.event_id !== editEventId ||
+                    !Number.isSafeInteger(draft.event_revision) ||
+                    draft.event_revision < 1 ||
+                    !draft.event || !Array.isArray(draft.days)) {
+                    throw new Error("Event identity or revision mismatch.");
+                }
+                // The revision loaded here is sent unchanged on Save.
+                const loadedRevision = draft.event_revision;
+                const eventData = draft.event;
+                if (!parseDate(eventData.start_date) ||
+                    !parseDate(eventData.end_date)) {
+                    throw new Error("Invalid saved dates.");
+                }
+
+                const availableUnitIds = new Set(
+                    Array.from(
+                        equipmentTemplate.content.querySelectorAll(
+                            "input[data-event-unit-id]"
+                        ), input => String(input.dataset.eventUnitId)
+                    )
+                );
+                const availableEmployeeIds = new Set(
+                    Array.from(
+                        shiftTemplate.content.querySelectorAll(
+                            '[data-shift-field="employeeId"] option'
+                        ), option => String(option.value)
+                    ).filter(Boolean)
+                );
+                const prepared = new Map();
+                for (const day of draft.days) {
+                    if (!parseDate(day.date) || prepared.has(day.date) ||
+                        !Array.isArray(day.equipment_ids) ||
+                        !Array.isArray(day.shifts)) {
+                        throw new Error("Invalid saved operating day.");
+                    }
+                    const equipmentIds = day.equipment_ids.map(String);
+                    if (equipmentIds.some(id => !availableUnitIds.has(id))) {
+                        throw new Error("Previously assigned equipment unavailable.");
+                    }
+                    const shifts = day.shifts.map(function (shift) {
+                        const employeeId = String(shift.employee_id);
+                        const unitId = shift.equipment_id == null
+                            ? "" : String(shift.equipment_id);
+                        if (!availableEmployeeIds.has(employeeId)) {
+                            throw new Error("Previously assigned employee unavailable.");
+                        }
+                        return {
+                            employeeId, start: shift.starts || "",
+                            end: shift.ends || "",
+                            overnight: Boolean(shift.ends_next_day),
+                            unitId, role: shift.role || "", notes: shift.notes || ""
+                        };
+                    });
+                    prepared.set(day.date, {
+                        operating: Boolean(day.operating),
+                        open: day.opens || "", close: day.closes || "",
+                        setup: day.setup || "", breakdown: day.breakdown || "",
+                        overnight: Boolean(day.closes_next_day),
+                        notes: day.notes || "", equipmentIds, shifts
+                    });
+                }
+
+                const fields = {
+                    event_name: eventData.name,
+                    start_date: eventData.start_date,
+                    end_date: eventData.end_date,
+                    next_occurrence: eventData.next_occurrence || "",
+                    venue_name: eventData.venue_name,
+                    street_address: eventData.street_address,
+                    address_line2: eventData.address_line2,
+                    city: eventData.city, county: eventData.county,
+                    state: eventData.state, zip_code: eventData.zip_code,
+                    parking_setup_location: eventData.parking_setup_location,
+                    contact_name: eventData.contact_name,
+                    contact_phone: eventData.contact_phone,
+                    contact_email: eventData.contact_email,
+                    public_description: eventData.public_description,
+                    notes_1: eventData.notes_1, notes_2: eventData.notes_2
+                };
+                for (const [id, value] of Object.entries(fields)) {
+                    const input = document.getElementById(id);
+                    if (!input) throw new Error("Required form field missing.");
+                    input.value = value == null ? "" : String(value);
+                }
+                const statusSelect = document.getElementById("event_status");
+                const selectedStatus = Array.from(statusSelect.options).find(
+                    option => option.value.toLowerCase() ===
+                        String(eventData.status).toLowerCase()
+                );
+                if (!selectedStatus) throw new Error("Unknown event status.");
+                statusSelect.value = selectedStatus.value;
+                document.getElementById("include_on_peachweb").checked =
+                    Boolean(eventData.include_on_peachweb);
+                document.getElementById("permits_obtained").checked =
+                    Boolean(eventData.permits_obtained);
+                for (const slot of ["1", "2", "3"]) {
+                    document.getElementById("custom_" + slot).value =
+                        String((draft.custom_values || {})[slot] || "");
+                    const savedLabel = (draft.custom_labels || {})[slot];
+                    if (savedLabel) {
+                        const label = document.querySelector(
+                            'label[for="custom_' + slot + '"]'
+                        );
+                        if (label) label.textContent = savedLabel;
+                    }
+                }
+                dailyValues.clear();
+                for (const [date, value] of prepared) {
+                    dailyValues.set(date, value);
+                }
+                renderDays();
+                // Only install Edit Save after the protected read and prefill succeed.
+                const editTransport = document.getElementById("ec_event_transport");
+                if (!editTransport || !save) {
+                    throw new Error("Edit submit controls are unavailable.");
+                }
+                let saveInProgress = false;
+                let saveSucceeded = false;
+                let staleRevision = false;
+                let activityTimer = null;
+                let lastObservedPayload = JSON.stringify(collectEventPayload());
+
+                function checkChangedPayload() {
+                    if (saveInProgress || saveSucceeded || staleRevision) return;
+                    let current;
+                    try {
+                        current = JSON.stringify(collectEventPayload());
+                    } catch (_error) {
+                        return;
+                    }
+                    if (current === lastObservedPayload) return;
+                    lastObservedPayload = current;
+                    status.textContent =
+                        "Unsaved changes to Event #" + editEventId + ".";
+                }
+
+                function watchEditingActivity(event) {
+                    if (event.isTrusted === false || saveInProgress ||
+                        saveSucceeded || staleRevision) return;
+                    if (activityTimer !== null) clearTimeout(activityTimer);
+                    activityTimer = setTimeout(function () {
+                        activityTimer = null;
+                        checkChangedPayload();
+                    }, 200);
+                }
+                document.addEventListener("input", watchEditingActivity, true);
+                document.addEventListener("change", watchEditingActivity, true);
+                document.addEventListener("click", watchEditingActivity, true);
+
+                editTransport.addEventListener("submit", async function (event) {
+                    event.preventDefault();
+                    if (saveInProgress || saveSucceeded || staleRevision) return;
+                    saveInProgress = true;
+                    save.disabled = true;
+                    save.textContent = "Saving Changes...";
+                    try {
+                        const payload = collectEventPayload();
+                        if (!payload || !Array.isArray(payload.days) ||
+                            !payload.days.length) {
+                            throw new Error("Select valid operating days before saving.");
+                        }
+                        const serialized = JSON.stringify(payload);
+                        if (serialized.length > 500000) {
+                            throw new Error("Event data exceeds the save limit.");
+                        }
+                        const body = new FormData();
+                        body.append("security_csrf_token", csrfInput.value);
+                        body.append("event_payload", serialized);
+                        body.append("expected_revision", String(loadedRevision));
+                        const response = await fetch(
+                            "/events/" + editEventId + "/edit-save-unlocked", {
+                                method: "POST",
+                                credentials: "same-origin",
+                                cache: "no-store",
+                                headers: {"Accept": "application/json"},
+                                body
+                            }
+                        );
+                        const result = await response.json().catch(() => null);
+                        if (response.status === 409 && result &&
+                            typeof result.error === "string" &&
+                            /changed|no longer available/i.test(result.error)) {
+                            staleRevision = true;
+                            status.textContent =
+                                "This event has changed since you opened it. " +
+                                "Your changes have NOT been saved and remain on " +
+                                "this page. Copy them before opening the latest event.";
+                            save.textContent = "Event Changed — Save Blocked";
+                            return;
+                        }
+                        if (!response.ok || !result || result.saved !== true) {
+                            throw new Error(
+                                result && result.error ||
+                                "Could not save this event. Check the data and try again."
+                            );
+                        }
+                        if (result.event_id !== editEventId ||
+                            result.event_revision !== loadedRevision + 1) {
+                            throw new Error("The event save response did not match this edit.");
+                        }
+                        saveSucceeded = true;
+                        status.textContent =
+                            "Event #" + editEventId + " saved successfully.";
+                        window.location.assign("/events/calendar");
+                    } catch (error) {
+                        status.textContent = error && error.message ||
+                            "Unable to save changes. Please try again.";
+                    } finally {
+                        saveInProgress = false;
+                        if (!staleRevision && !saveSucceeded) {
+                            save.disabled = false;
+                            save.textContent = "Save Changes";
+                        }
+                    }
+                });
+                save.disabled = false;
+                status.textContent =
+                    "Event #" + editEventId +
+                    " loaded successfully. You can now save changes.";
+
+                // Audit display is optional, safely text-only, and read from
+                // the already protected Event Details API. Never send a user ID.
+                const historyTop = document.getElementById("ec_edit_history_top");
+                if (historyTop) {
+                    void (async function () {
+                        try {
+                            const historyResponse = await fetch(
+                                "/events/" + editEventId + "/details", {
+                                    method: "GET",
+                                    credentials: "same-origin",
+                                    cache: "no-store",
+                                    headers: {"Accept": "application/json"}
+                                }
+                            );
+                            if (!historyResponse.ok) return;
+                            const historyResult = await historyResponse.json();
+                            const savedEvent = historyResult && historyResult.event;
+                            if (historyResult.ok !== true || !savedEvent ||
+                                savedEvent.event_id !== editEventId ||
+                                typeof savedEvent.history_text !== "string" ||
+                                !savedEvent.history_text.trim()) return;
+                            historyTop.textContent = savedEvent.history_text;
+                            historyTop.hidden = false;
+                        } catch (_error) {
+                            // Audit display failure never prevents event editing.
+                        }
+                    })();
+                }
+            } catch (_error) {
+                status.textContent =
+                    "Unable to load this event for editing. A saved resource " +
+                    "may be unavailable. Select Cancel Editing to return.";
+            }
+        });
+    }
+
+    // EC-060-8: Calendar day-number quick add.
+    window.addEventListener("load", function () {
+        if (isEditMode) return;
+        if (isCopyMode) return;
+        const requestedDate =
+            new URLSearchParams(window.location.search).get("date");
+
+        if (!requestedDate || !parseDate(requestedDate)) {
+            return;
+        }
+
+        startInput.value = requestedDate;
+        endInput.value = requestedDate;
+        renderDays();
+    });
+
+    daysContainer.addEventListener(
+        "input", updateDayFromInput
+    );
+    daysContainer.addEventListener(
+        "change", updateDayFromInput
+    );
+
+    applyButton.addEventListener("click", function () {
+        const defaults = bulkValues();
+
+        for (
+            const row of daysContainer.querySelectorAll(".ec-day-row")
+        ) {
+            const values = dailyValues.get(row.dataset.date);
+
+            if (values && values.operating) {
+                Object.assign(values, defaults);
+            }
+        }
+
+        renderDays();
+    });
+
+
+    const transport =
+        document.getElementById("ec_event_transport");
+    const payloadInput =
+        document.getElementById("ec_event_payload");
+    const previewButton =
+        document.getElementById("ec_preview_payload");
+    const payloadSummary =
+        document.getElementById("ec_payload_summary");
+    const saveButton =
+        document.getElementById("ec_save_event");
+    const submissionInput =
+        document.getElementById("ec_submission_token");
+    const newEventLink =
+        document.getElementById("ec_new_event_link");
+
+    function fieldValue(id) {
+        const field = document.getElementById(id);
+        return field ? field.value : "";
+    }
+
+    function fieldChecked(id) {
+        const field = document.getElementById(id);
+        return Boolean(field && field.checked);
+    }
+
+
+    function firstMissingRequiredEventField() {
+        const fields = [
+            ["event_name", "Event Name"],
+            ["start_date", "Start Date"],
+            ["end_date", "End Date"],
+            ["street_address", "Street Address"],
+            ["city", "City"],
+            ["state", "State"],
+            ["zip_code", "ZIP Code"]
+        ];
+
+        for (const item of fields) {
+            const element = document.getElementById(item[0]);
+
+            if (!element ||
+                !String(element.value || "").trim()) {
+                return {
+                    element: element,
+                    label: item[1]
+                };
+            }
+        }
+
+        return null;
+    }
+
+    function collectEventPayload() {
+        const days = Array.from(
+            daysContainer.querySelectorAll(".ec-day-row"),
+            function (row) {
+                const dateKey = row.dataset.date;
+                const state = dailyValues.get(dateKey);
+
+                if (!state) return null;
+
+                const operating = Boolean(state.operating);
+
+                return {
+                    date: dateKey,
+                    operating: operating,
+                    opens: operating ? state.open : null,
+                    closes: operating ? state.close : null,
+                    closes_next_day:
+                        operating && Boolean(state.overnight),
+                    setup: operating ? state.setup : null,
+                    breakdown: operating ? state.breakdown : null,
+                    notes: operating ? state.notes : "",
+                    equipment_ids: operating
+                        ? state.equipmentIds.slice()
+                        : [],
+                    shifts: operating
+                        ? state.shifts.map(function (shift) {
+                            return {
+                                employee_id: shift.employeeId,
+                                starts: shift.start,
+                                ends: shift.end,
+                                ends_next_day:
+                                    Boolean(shift.overnight),
+                                equipment_id: shift.unitId,
+                                role: shift.role,
+                                notes: shift.notes
+                            };
+                        })
+                        : []
+                };
+            }
+        ).filter(Boolean);
+
+        return {
+            event: {
+                name: fieldValue("event_name"),
+                start_date: fieldValue("start_date"),
+                end_date: fieldValue("end_date"),
+                next_occurrence: fieldValue("next_occurrence"),
+                status: fieldValue("event_status").toLowerCase(),
+                include_on_peachweb:
+                    fieldChecked("include_on_peachweb"),
+                venue_name: fieldValue("venue_name"),
+                street_address: fieldValue("street_address"),
+                address_line2: fieldValue("address_line2"),
+                city: fieldValue("city"),
+                county: fieldValue("county"),
+                state: fieldValue("state"),
+                zip_code: fieldValue("zip_code"),
+                parking_setup_location:
+                    fieldValue("parking_setup_location"),
+                contact_name: fieldValue("contact_name"),
+                contact_phone: fieldValue("contact_phone"),
+                contact_email: fieldValue("contact_email"),
+                permits_obtained:
+                    fieldChecked("permits_obtained"),
+                public_description:
+                    fieldValue("public_description"),
+                notes_1: fieldValue("notes_1"),
+                notes_2: fieldValue("notes_2")
+            },
+            custom_values: {
+                "1": fieldValue("custom_1"),
+                "2": fieldValue("custom_2"),
+                "3": fieldValue("custom_3")
+            },
+            days: days
+        };
+    }
+
+    // Protected Save Event handler is installed after
+    // the existing staffing review initialization.
+
+
+
+    let coverageRevision = 0;
+    let coverageAutoEnabled = false;
+    let coverageAutoTimer = null;
+    let coverageAutoPending = false;
+
+    let saveInProgress = false;
+    let saveCompleted = false;
+    let saveUncertain = false;
+    let pendingSavePayload = null;
+    let pendingSaveToken = null;
+    let lockedControls = null;
+
+    function scheduleAutomaticStaffingReview() {
+        if (!coverageAutoEnabled || !previewButton ||
+            saveInProgress || saveCompleted || saveUncertain) return;
+
+        if (coverageAutoTimer !== null) {
+            clearTimeout(coverageAutoTimer);
+        }
+
+        coverageAutoTimer = setTimeout(function () {
+            coverageAutoTimer = null;
+
+            if (previewButton.disabled) {
+                coverageAutoPending = true;
+                return;
+            }
+
+            coverageAutoPending = false;
+            previewButton.click();
+        }, 500);
+    }
+
+    function clearStaffingWarnings() {
+        if (!employeeDays) return;
+
+        employeeDays.querySelectorAll(".ec-staffing-coverage")
+            .forEach(function (notice) {
+                notice.replaceChildren();
+                notice.hidden = true;
+            });
+    }
+
+    function renderStaffingWarnings(result) {
+        clearStaffingWarnings();
+
+        const report = result.staffing_coverage;
+        const zone = result.staffing_time_zone;
+
+        if (!employeeDays || !report ||
+            !Array.isArray(report.days) ||
+            typeof zone !== "string") return;
+
+        const names = new Map();
+
+        equipmentTemplate.content.querySelectorAll(
+            "input[data-event-unit-id]"
+        ).forEach(function (input) {
+            const label = input.closest("label");
+            const heading = label && label.querySelector("strong");
+
+            names.set(
+                String(input.dataset.eventUnitId),
+                heading ? heading.textContent.trim() : "Equipment"
+            );
+        });
+
+        const clock = new Intl.DateTimeFormat("en-US", {
+            timeZone: zone,
+            hour: "numeric",
+            minute: "2-digit"
+        });
+
+        const dateLabel = new Intl.DateTimeFormat("en-US", {
+            timeZone: zone,
+            month: "short",
+            day: "numeric"
+        });
+
+        function intervalLabel(gap) {
+            const start = new Date(gap.starts_at);
+            const end = new Date(gap.ends_at);
+
+            const differentDays =
+                dateLabel.format(start) !== dateLabel.format(end);
+
+            return (
+                (differentDays ? dateLabel.format(start) + " " : "") +
+                clock.format(start) + " to " +
+                (differentDays ? dateLabel.format(end) + " " : "") +
+                clock.format(end)
+            );
+        }
+
+        function durationLabel(minutes) {
+            const hours = Math.floor(minutes / 60);
+            const remainder = minutes % 60;
+
+            if (hours && remainder) {
+                return hours + " hr " + remainder + " min";
+            }
+
+            if (hours) {
+                return hours + (hours === 1 ? " hour" : " hours");
+            }
+
+            return minutes + " min";
+        }
+
+        for (const day of report.days) {
+            const card = Array.from(
+                employeeDays.querySelectorAll(".ec-employee-day")
+            ).find(function (item) {
+                return item.dataset.date === day.date;
+            });
+
+            if (!card) continue;
+
+            const notice =
+                card.querySelector(".ec-staffing-coverage");
+
+            if (!notice) continue;
+
+            let warnings = 0;
+
+            for (const unit of day.unit_coverage || []) {
+                if (unit.status === "covered") continue;
+
+                warnings++;
+
+                const title = document.createElement("p");
+
+                const unitName = unit.unit_id === null
+                    ? "Event-wide staffing"
+                    : (
+                        names.get(String(unit.unit_id)) ||
+                        "Assigned equipment"
+                    );
+
+                title.textContent =
+                    "⚠ Staffing coverage — " + unitName;
+
+                title.style.fontWeight = "700";
+                title.style.color = "#B42318";
+                notice.append(title);
+
+                for (const gap of unit.gaps || []) {
+                    const detail = document.createElement("p");
+
+                    detail.textContent =
+                        "No employee assigned: " +
+                        intervalLabel(gap) + " (" +
+                        durationLabel(gap.minutes) +
+                        " uncovered).";
+
+                    notice.append(detail);
+                }
+            }
+
+            if (day.unassigned_shift_count > 0) {
+                warnings++;
+
+                const note = document.createElement("p");
+
+                note.textContent =
+                    day.unassigned_shift_count +
+                    " employee shift(s) have no specific " +
+                    "equipment selected and do not count " +
+                    "toward truck coverage.";
+
+                notice.append(note);
+            }
+
+            if (warnings) {
+                const advisory = document.createElement("p");
+
+                advisory.textContent =
+                    "Advisory only — staffing gaps do not block saving.";
+
+                notice.append(advisory);
+                notice.hidden = false;
+            }
+        }
+    }
+
+    // Prevent old validation results from remaining visible
+    // after the owner changes the schedule.
+
+    const coverageScope =
+        document.querySelector(".event-draft") || document;
+
+    function invalidateStaffingReview() {
+        coverageRevision++;
+        clearStaffingWarnings();
+
+        if (
+            payloadSummary &&
+            payloadSummary.textContent.includes("SERVER VALIDATION")
+        ) {
+            payloadSummary.textContent =
+                "Event details changed. Staffing coverage will " +
+                "refresh automatically.";
+
+            payloadSummary.classList.remove(
+                "ec-validation-error"
+            );
+        }
+        scheduleAutomaticStaffingReview();
+    }
+
+    coverageScope.addEventListener(
+        "input", invalidateStaffingReview
+    );
+
+    coverageScope.addEventListener(
+        "change", invalidateStaffingReview
+    );
+
+    coverageScope.addEventListener("click", function (event) {
+        const button = event.target.closest("button");
+
+        if (
+            button &&
+            button !== previewButton &&
+            button !== saveButton &&
+            !button.disabled
+        ) {
+            invalidateStaffingReview();
+        }
+    });
+
+    if (previewButton && payloadInput &&
+        payloadSummary && transport) {
+
+        previewButton.addEventListener(
+            "click",
+            async function () {
+
+                if (coverageAutoTimer !== null) {
+                    clearTimeout(coverageAutoTimer);
+                    coverageAutoTimer = null;
+                }
+
+                coverageAutoPending = false;
+
+                if (saveInProgress || saveCompleted ||
+                    saveUncertain) return;
+
+                const missingField =
+                    firstMissingRequiredEventField();
+
+                if (missingField) {
+                    clearStaffingWarnings();
+                    payloadInput.value = "";
+                    payloadSummary.textContent =
+                        "REVIEW FAILED — " +
+                        missingField.label + " is required.";
+                    payloadSummary.classList.add(
+                        "ec-validation-error"
+                    );
+                    return;
+                }
+
+                const requestRevision = coverageRevision;
+                clearStaffingWarnings();
+                const payload = collectEventPayload();
+
+                payloadSummary.classList.remove(
+                    "ec-validation-error"
+                );
+
+                if (!payload.days.length) {
+                    payloadSummary.textContent =
+                        "Select a valid event date range first.";
+                    payloadSummary.classList.add(
+                        "ec-validation-error"
+                    );
+                    payloadInput.value = "";
+                    return;
+                }
+
+                const serialized = JSON.stringify(payload);
+
+                if (serialized.length > 500000) {
+                    payloadSummary.textContent =
+                        "The event data is too large.";
+                    payloadSummary.classList.add(
+                        "ec-validation-error"
+                    );
+                    payloadInput.value = "";
+                    return;
+                }
+
+                payloadInput.value = serialized;
+                previewButton.disabled = true;
+
+                payloadSummary.textContent =
+                    "Checking event information and times " +
+                    "with the Local server...";
+
+                try {
+                    const response = await fetch(
+                        "{{ url_for('validate_event_draft') }}",
+                        {
+                            method: "POST",
+                            credentials: "same-origin",
+                            headers: {
+                                "Accept": "application/json"
+                            },
+                            body: new FormData(transport)
+                        }
+                    );
+
+                    if (!response.headers.get("content-type")
+                        ?.includes("application/json")) {
+                        throw new Error(
+                            "Server returned HTTP " +
+                            response.status +
+                            " without a JSON response."
+                        );
+                    }
+
+                    const result = await response.json();
+
+                    if (requestRevision !== coverageRevision ||
+                        saveInProgress || saveCompleted ||
+                        saveUncertain) {
+                        payloadSummary.textContent =
+                            "Event changed during validation. " +
+                            "Please review the updated schedule again.";
+                        return;
+                    }
+
+                    if (
+                        response.ok &&
+                        result.ok === true &&
+                        result.ready_to_save === false &&
+                        result.ownership_validated === true &&
+                        result.availability_validated === true &&
+                        result.validation_level ===
+                            "database_preflight"
+                    ) {
+                        renderStaffingWarnings(result);
+                        coverageAutoEnabled = true;
+                        payloadSummary.textContent =
+                            "SERVER VALIDATION PASSED — " +
+                            result.calendar_days +
+                            " calendar day(s), " +
+                            result.operating_days +
+                            " operating day(s), " +
+                            result.equipment_assignments +
+                            " equipment assignment(s), and " +
+                            result.employee_shifts +
+                            " employee shift(s). " +
+                            "Equipment ownership, employee " +
+                            "eligibility, and existing reservations " +
+                            "passed database preflight. " +
+                            "Nothing was saved. Availability will " +
+                            "be rechecked during saving.";
+                    } else {
+                        const reason =
+                            typeof result.error === "string"
+                                ? result.error
+                                : "HTTP " + response.status;
+
+                        payloadSummary.textContent =
+                            "SERVER VALIDATION FAILED — " +
+                            reason +
+                            " Nothing was saved.";
+
+                        payloadSummary.classList.add(
+                            "ec-validation-error"
+                        );
+                    }
+
+                } catch (error) {
+                    if (requestRevision !== coverageRevision ||
+                        saveInProgress || saveCompleted ||
+                        saveUncertain) {
+                        return;
+                    }
+
+                    payloadSummary.textContent =
+                        "SERVER VALIDATION UNAVAILABLE — " +
+                        "Check the Local Flask server and " +
+                        "your login session. Nothing was saved.";
+
+                    payloadSummary.classList.add(
+                        "ec-validation-error"
+                    );
+
+                    console.warn(
+                        "Event draft validation unavailable:",
+                        error.message
+                    );
+
+                } finally {
+                    previewButton.disabled =
+                        saveInProgress || saveCompleted || saveUncertain;
+
+                    if (coverageAutoPending &&
+                        !saveInProgress && !saveCompleted &&
+                        !saveUncertain) {
+                        coverageAutoPending = false;
+                        scheduleAutomaticStaffingReview();
+                    }
+                }
+            }
+        );
+    }
+
+
+    function showSaveStatus(message, error) {
+        payloadSummary.textContent = message;
+        payloadSummary.classList.toggle(
+            "ec-validation-error", Boolean(error)
+        );
+    }
+
+    function lockEditor() {
+        if (lockedControls !== null) return;
+
+        const root =
+            document.querySelector(".event-draft") || transport;
+
+        lockedControls = Array.from(
+            root.querySelectorAll("input, select, textarea, button"),
+            function (control) {
+                return [control, control.disabled];
+            }
+        );
+
+        lockedControls.forEach(function (entry) {
+            entry[0].disabled = true;
+        });
+    }
+
+    function unlockEditor() {
+        if (lockedControls === null) return;
+
+        lockedControls.forEach(function (entry) {
+            entry[0].disabled = entry[1];
+        });
+
+        lockedControls = null;
+    }
+
+    function saveRequestData(serialized, token) {
+        const csrf = transport.querySelector(
+            'input[name="security_csrf_token"]'
+        );
+
+        if (!csrf || !csrf.value) {
+            throw new Error(
+                "Security token missing. Please reload the form."
+            );
+        }
+
+        const data = new FormData();
+        data.append("security_csrf_token", csrf.value);
+        data.append("event_payload", serialized);
+        data.append("submission_token", token);
+
+        return data;
+    }
+
+    if (!isEditMode && transport && saveButton && submissionInput &&
+        payloadInput && payloadSummary && previewButton) {
+
+        transport.addEventListener("submit", async function (event) {
+            event.preventDefault();
+
+            if (isCopyMode && !copyDraftReady) {
+                showSaveStatus("Select Prepare Copy before saving a new event.", true);
+                return;
+            }
+            if (saveInProgress || saveCompleted) return;
+
+            const retry = saveUncertain;
+            const revision = coverageRevision;
+
+            let saveDispatched = false;
+            let definiteRejection = false;
+
+            try {
+                if (!retry) {
+                    const missingField =
+                        firstMissingRequiredEventField();
+
+                    if (missingField) {
+                        if (missingField.element) {
+                            missingField.element.focus();
+                        }
+                        throw new Error(
+                            missingField.label + " is required."
+                        );
+                    }
+
+                    if (previewButton.disabled) {
+                        throw new Error(
+                            "A staffing review is still running. " +
+                            "Please try saving again."
+                        );
+                    }
+
+                    const payload = collectEventPayload();
+
+                    if (!payload.days.length) {
+                        throw new Error(
+                            "Select a valid event date range."
+                        );
+                    }
+
+                    const serialized = JSON.stringify(payload);
+
+                    if (serialized.length > 500000) {
+                        throw new Error(
+                            "The event information is too large."
+                        );
+                    }
+
+                    if (serialized !== pendingSavePayload) {
+                        if (!window.crypto ||
+                            typeof window.crypto.randomUUID !== "function") {
+                            throw new Error(
+                                "Secure submission tokens are unavailable."
+                            );
+                        }
+
+                        pendingSavePayload = serialized;
+                        pendingSaveToken = window.crypto.randomUUID();
+                    }
+                }
+
+                if (!pendingSavePayload || !pendingSaveToken) {
+                    throw new Error(
+                        "No event submission is available."
+                    );
+                }
+
+                saveInProgress = true;
+                lockEditor();
+
+                saveButton.disabled = true;
+                previewButton.disabled = true;
+
+                payloadInput.value = pendingSavePayload;
+                submissionInput.value = pendingSaveToken;
+
+                if (!retry) {
+                    showSaveStatus(
+                        "Checking schedule availability before saving...",
+                        false
+                    );
+
+                    const response = await fetch(
+                        "{{ url_for('validate_event_draft') }}",
+                        {
+                            method: "POST",
+                            credentials: "same-origin",
+                            headers: {
+                                "Accept": "application/json"
+                            },
+                            body: saveRequestData(
+                                pendingSavePayload,
+                                pendingSaveToken
+                            )
+                        }
+                    );
+
+                    const contentType =
+                        response.headers.get("content-type") || "";
+
+                    if (!contentType.includes("application/json")) {
+                        throw new Error(
+                            "Validation did not return a valid response. " +
+                            "Please check your login session."
+                        );
+                    }
+
+                    const result = await response.json();
+
+                    if (!(
+                        response.ok &&
+                        result.ok === true &&
+                        result.ready_to_save === false &&
+                        result.ownership_validated === true &&
+                        result.availability_validated === true &&
+                        result.validation_level === "database_preflight"
+                    )) {
+                        throw new Error(
+                            typeof result.error === "string"
+                                ? result.error
+                                : "Event validation failed."
+                        );
+                    }
+
+                    if (
+                        revision !== coverageRevision ||
+                        JSON.stringify(collectEventPayload()) !==
+                            pendingSavePayload
+                    ) {
+                        throw new Error(
+                            "Event details changed during validation. " +
+                            "Please review and retry."
+                        );
+                    }
+
+                    renderStaffingWarnings(result);
+                }
+
+                showSaveStatus(
+                    retry
+                        ? "Checking the original Save Event request..."
+                        : "Saving event and schedules...",
+                    false
+                );
+
+                // Once dispatched, a missing response does
+                // not prove that the save failed.
+                saveDispatched = true;
+
+                const response = await fetch(
+                    "{{ url_for('save_peachpos_event') }}",
+                    {
+                        method: "POST",
+                        credentials: "same-origin",
+                        headers: {
+                            "Accept": "application/json"
+                        },
+                        body: saveRequestData(
+                            pendingSavePayload,
+                            pendingSaveToken
+                        )
+                    }
+                );
+
+                const contentType =
+                    response.headers.get("content-type") || "";
+
+                if (!contentType.includes("application/json")) {
+                    throw new Error(
+                        "Save confirmation was not received."
+                    );
+                }
+
+                const result = await response.json();
+
+                if (
+                    response.ok &&
+                    result.ok === true &&
+                    result.saved === true &&
+                    Number.isSafeInteger(result.event_id) &&
+                    result.event_id > 0
+                ) {
+                    saveCompleted = true;
+                    saveUncertain = false;
+
+                    showSaveStatus(
+                        result.duplicate
+                            ? "Event #" + result.event_id +
+                              " was already saved. No duplicate created."
+                            : "Event #" + result.event_id +
+                              " saved successfully with its schedules.",
+                        false
+                    );
+
+                    // This action appears only after an acknowledged save.
+                    // A distinct saved-event URL avoids browser Back cache.
+                    if (newEventLink) {
+                        const returnLink = document.getElementById(
+                            "ec_return_to_calendar_after_save"
+                        );
+                        if (returnLink) {
+                            const calendarUrl = new URL(
+                                "{{ url_for('peachpos_event_calendar_month') }}",
+                                window.location.href
+                            );
+                            // Use the submitted payload, not an edited field,
+                            // to choose the newly saved event's calendar month.
+                            let startDate = null;
+                            try {
+                                const savedDraft = JSON.parse(pendingSavePayload);
+                                startDate = savedDraft && savedDraft.event &&
+                                    savedDraft.event.start_date;
+                            } catch (_error) {
+                                // The default calendar link remains available.
+                            }
+                            const dateParts = typeof startDate === "string"
+                                ? /^(\d{4})-(0[1-9]|1[0-2])-\d{2}$/.exec(startDate)
+                                : null;
+                            if (dateParts) {
+                                calendarUrl.searchParams.set("year", dateParts[1]);
+                                calendarUrl.searchParams.set(
+                                    "month", String(Number(dateParts[2]))
+                                );
+                            }
+                            calendarUrl.searchParams.set(
+                                "saved_event_id", String(result.event_id)
+                            );
+                            returnLink.href = calendarUrl.href;
+                        }
+                        newEventLink.hidden = false;
+                    }
+
+                    return;
+                }
+
+                if (
+                    [400, 403, 409, 413, 422].includes(response.status) &&
+                    result.saved === false
+                ) {
+                    definiteRejection = true;
+                }
+
+                throw new Error(
+                    typeof result.error === "string"
+                        ? result.error
+                        : "The save status could not be confirmed."
+                );
+
+            } catch (error) {
+                if (saveDispatched && !definiteRejection) {
+                    saveUncertain = true;
+
+                    showSaveStatus(
+                        "SAVE STATUS UNKNOWN — The event may have " +
+                        "been saved. Do not reload or edit. " +
+                        "Select Check / Retry Save.",
+                        true
+                    );
+
+                    console.warn(
+                        "Save confirmation unavailable:",
+                        error.message
+                    );
+
+                } else {
+                    saveUncertain = false;
+
+                    showSaveStatus(
+                        "EVENT NOT SAVED — " +
+                        (error.message || "Review and retry."),
+                        true
+                    );
+                }
+
+            } finally {
+                saveInProgress = false;
+
+                if (saveCompleted) {
+                    saveButton.textContent = "Event Saved";
+                    saveButton.disabled = true;
+                    previewButton.disabled = true;
+
+                } else if (saveUncertain) {
+                    // Preserve original payload and token.
+                    // Keep all event editing controls locked.
+                    saveButton.textContent = "Check / Retry Save";
+                    saveButton.disabled = false;
+                    previewButton.disabled = true;
+
+                } else {
+                    unlockEditor();
+                    saveButton.textContent = isCopyMode
+                        ? "Save as New Event" : "Save Event";
+                    saveButton.disabled = false;
+                    previewButton.disabled = false;
+
+                    if (coverageAutoPending) {
+                        coverageAutoPending = false;
+                        scheduleAutomaticStaffingReview();
+                    }
+                }
+            }
+        });
+    }
+
+    renderDays();
+})();
+</script>
+
+</div>
+
+{% endblock %}

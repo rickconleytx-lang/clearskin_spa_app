@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a href="{{ url_for('master_admin_home') }}" class="btn">
+        Back to Master Admin
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        Website Management
+    </h1>
+
+    <p>
+        Manage the public Peach Suite Pro marketing website.
+    </p>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Home Page</h2>
+
+        <p>
+            Editing {{ content_source }}.
+            Save Draft stores changes privately without
+            changing the public website.
+        </p>
+
+        <form
+            method="POST"
+            action="{{ url_for('master_admin_website_save_draft') }}"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+            <input
+                type="hidden"
+                name="expected_draft_revision_id"
+                value="{{ draft_revision_id if draft_revision_id is not none else '' }}"
+            >
+
+        <div style="margin-top: 20px;">
+            <label for="cms-primary-button">
+                <strong>Primary Button Text</strong>
+            </label>
+            <input
+                id="cms-primary-button"
+                name="primary_button_text"
+                maxlength="80"
+                required
+                type="text"
+                value="{{ home_hero.primary_button_text }}"
+                style="display: block; width: 100%;
+                       box-sizing: border-box; margin-top: 6px;"
+            >
+        </div>
+
+        <div style="margin-top: 20px;">
+            <label for="cms-secondary-button">
+                <strong>Secondary Button Text</strong>
+            </label>
+            <input
+                id="cms-secondary-button"
+                name="secondary_button_text"
+                maxlength="80"
+                required
+                type="text"
+                value="{{ home_hero.secondary_button_text }}"
+                style="display: block; width: 100%;
+                       box-sizing: border-box; margin-top: 6px;"
+            >
+        </div>
+
+        <div style="margin-top: 20px;">
+            <label for="cms-pricing-sentence">
+                <strong>Pricing Sentence</strong>
+            </label>
+            <textarea
+                id="cms-pricing-sentence"
+                name="pricing_sentence"
+                maxlength="300"
+                required
+                rows="3"
+                style="display: block; width: 100%;
+                       box-sizing: border-box; margin-top: 6px;"
+            >{{ home_hero.pricing_sentence }}</textarea>
+        </div>
+
+            <div style="margin-top: 24px;">
+                <button type="submit" class="btn">
+                    Save Draft
+                </button>
+            </div>
+
+        </form>
+
+        {% if draft_revision_id is not none %}
+        <div style="margin-top: 16px;">
+            <a class="btn"
+               href="{{ url_for('master_admin_website_home_preview') }}">
+                Preview Draft
+            </a>
+        </div>
+
+        <div style="margin-top: 12px;">
+            <a class="btn"
+               href="{{ url_for('master_admin_website_publish_review') }}">
+                Review for Publishing
+            </a>
+        </div>
+        {% endif %}
+
+        <div style="margin-top: 16px;">
+            <a class="btn"
+               href="{{ url_for('master_admin_website_home_published') }}"
+               target="_blank"
+               rel="noopener noreferrer">
+                View Published Website
+            </a>
+        </div>
+
+        <div style="margin-top: 16px;">
+            <a class="btn"
+               href="{{ url_for('master_admin_website_home_history') }}">
+                View Revision History
+            </a>
+        </div>
+
+        <p style="margin-top: 24px;">
+            <em>
+                Draft changes remain private.
+                Preview is available. Publishing requires explicit confirmation on the review screen.
+            </em>
+        </p>
+    </div>
+
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Home Page — Product Promotion</h2>
+
+        <p>
+            Edit the Product Promotion independently from
+            the Home Page Hero. Draft changes remain private.
+        </p>
+
+        <a
+            class="btn"
+            href="{{ url_for('master_admin_website_promotion_editor') }}"
+        >
+            Edit Product Promotion
+        </a>
+
+    </div>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Home Page — PeachWeb Showcase</h2>
+
+        <p>
+            Preview the PeachWeb picture and caption.
+            Draft editing will remain separate from publication.
+        </p>
+
+        <a
+            class="btn"
+            href="{{ url_for('master_admin_website_peachweb_editor') }}"
+        >
+            Edit PeachWeb Showcase
+        </a>
+
+    </div>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Home Page — PeachBook Showcase</h2>
+
+        <p>
+            Preview the PeachBook picture and caption.
+            Draft changes remain private until published.
+        </p>
+
+        <a
+            class="btn"
+            href="{{ url_for('master_admin_website_peachbook_editor') }}"
+        >
+            Edit PeachBook Showcase
+        </a>
+
+    </div>
+
+    <div style="margin-top: 28px;">
+
+        <h2>Subscription Packages &amp; Pricing</h2>
+
+            <!-- PRODUCT EDITOR NAV START -->
+            <div style="
+                border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin: 20px 0 28px;
+            ">
+                <h3>Subscription Product Cards</h3>
+
+                <p>
+                    Edit shared product details and the independent
+                    Packages and Pricing descriptions. Changes
+                    remain private until separately published.
+                </p>
+
+                <div style="
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 12px;
+                    margin-top: 18px;
+                ">
+                    {% for product_key, product_label in [
+                        ('solo', 'Solo'),
+                        ('peachpos', 'PeachPOS'),
+                        ('team', 'Team'),
+                        ('collective', 'Peach Collective')
+                    ] %}
+                    <a class="btn"
+                       href="{{ url_for(
+                           'master_admin_website_product_editor',
+                           product_key=product_key
+                       ) }}">
+                        Edit {{ product_label }}
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            <!-- PRODUCT EDITOR NAV END -->
+
+        <p>
+            Edit the introduction for each page independently.
+            Save Draft does not change the public website.
+        </p>
+
+        <div style="
+            border: 1px solid #bbb;
+            border-radius: 12px;
+            padding: 22px;
+            margin-top: 20px;
+        ">
+
+            <h3>Subscription Packages Introduction</h3>
+
+            <p>
+                Edit the promotional heading and paragraph
+                on the Subscription Packages page.
+            </p>
+
+            <a
+                class="btn"
+                href="{{ url_for('master_admin_website_intro_editor', surface='packages') }}"
+            >
+                Edit Subscription Packages Introduction
+            </a>
+
+        </div>
+
+        <div style="
+            border: 1px solid #bbb;
+            border-radius: 12px;
+            padding: 22px;
+            margin-top: 20px;
+        ">
+
+            <h3>Pricing Introduction</h3>
+
+            <p>
+                Edit the independent promotional heading
+                and paragraph on the Pricing page.
+            </p>
+
+            <a
+                class="btn"
+                href="{{ url_for('master_admin_website_intro_editor', surface='pricing') }}"
+            >
+                Edit Pricing Introduction
+            </a>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

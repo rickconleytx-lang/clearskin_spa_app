@@ -614,7 +614,9 @@ def complete_stripe_checkout_signup_from_event(
             stripe_customer_id,
             stripe_subscription_id,
             checkout_completed_at,
-            provisioned_at
+            provisioned_at,
+            trial_period_days,
+            trial_offer_key
         FROM stripe_checkout_signups
         WHERE environment = %s
           AND checkout_signup_token = %s
@@ -644,6 +646,8 @@ def complete_stripe_checkout_signup_from_event(
         stored_subscription_id,
         checkout_completed_at,
         provisioned_at,
+        trial_period_days,
+        trial_offer_key,
     ) = row
 
     signup_status = str(
@@ -653,6 +657,25 @@ def complete_stripe_checkout_signup_from_event(
     tier_code = str(
         tier_code or ""
     ).strip().lower()
+
+    trial_offer_key = (
+        str(trial_offer_key or "").strip().lower()
+        or None
+    )
+
+    if trial_offer_key is None:
+        if trial_period_days != 10:
+            raise StripeServiceError(
+                "Standard trial duration is invalid."
+            )
+    elif not (
+        tier_code == "pos"
+        and trial_period_days == 60
+        and trial_offer_key == "katzz60"
+    ):
+        raise StripeServiceError(
+            "Stripe trial authorization is invalid."
+        )
 
     stored_checkout_session_id = str(
         stored_checkout_session_id or ""
@@ -666,15 +689,15 @@ def complete_stripe_checkout_signup_from_event(
         stored_subscription_id or ""
     ).strip()
 
-    if tier_code != "solo":
+    if tier_code not in {"solo", "pos"}:
         raise StripeServiceError(
             "Completed Stripe Checkout does not "
-            "belong to a Solo signup."
+            "belong to a supported signup plan."
         )
 
     if int(provider_quantity or 0) != 1:
         raise StripeServiceError(
-            "Solo Checkout completion requires "
+            "Stripe Checkout completion requires "
             "exactly one provider."
         )
 
@@ -750,6 +773,31 @@ def complete_stripe_checkout_signup_from_event(
                 "conflicting Stripe identity."
             )
 
+        if trial_offer_key is not None:
+            cursor.execute(
+                """
+                SELECT
+                    stripe_checkout_signup_id,
+                    stripe_subscription_id
+                FROM stripe_trial_offer_redemptions
+                WHERE environment = %s
+                  AND trial_offer_key = %s
+                FOR UPDATE
+                """,
+                (environment, trial_offer_key),
+            )
+
+            existing_redemption = cursor.fetchone()
+
+            if existing_redemption != (
+                stripe_checkout_signup_id,
+                stripe_subscription_id,
+            ):
+                raise StripeServiceError(
+                    "Stripe trial redemption does not "
+                    "match the completed signup."
+                )
+
         return {
             "stripe_checkout_signup_id": (
                 stripe_checkout_signup_id
@@ -824,6 +872,37 @@ def complete_stripe_checkout_signup_from_event(
             "Stripe Checkout completion could not "
             "safely update the PSP signup."
         )
+
+    if trial_offer_key is not None:
+        cursor.execute(
+            """
+            INSERT INTO stripe_trial_offer_redemptions (
+                environment,
+                trial_offer_key,
+                stripe_checkout_signup_id,
+                stripe_subscription_id
+            )
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (
+                environment,
+                trial_offer_key
+            )
+            DO NOTHING
+            RETURNING stripe_trial_offer_redemption_id
+            """,
+            (
+                environment,
+                trial_offer_key,
+                stripe_checkout_signup_id,
+                stripe_subscription_id,
+            ),
+        )
+
+        if cursor.fetchone() is None:
+            raise StripeServiceError(
+                "This private trial offer has already "
+                "been redeemed."
+            )
 
     return {
         "stripe_checkout_signup_id": (
@@ -951,15 +1030,15 @@ def provision_completed_stripe_signup(
         stripe_subscription_id or ""
     ).strip()
 
-    if tier_code != "solo":
+    if tier_code not in {"solo", "pos"}:
         raise StripeServiceError(
-            "Only Solo may be provisioned from this "
+            "Only Solo or PeachPOS may be provisioned from this "
             "Stripe signup flow."
         )
 
     if int(provider_quantity or 0) != 1:
         raise StripeServiceError(
-            "Solo Stripe provisioning requires "
+            "Stripe signup provisioning requires "
             "exactly one provider."
         )
 
@@ -1125,7 +1204,7 @@ def provision_completed_stripe_signup(
                 owner_first_name=owner_first_name,
                 owner_last_name=owner_last_name,
                 owner_email=owner_email,
-                subscription_tier_code="solo",
+                subscription_tier_code=tier_code,
                 organization_type_code="solo_owner",
                 subscription_status="Trial",
                 timezone_name=timezone_name,
@@ -2366,6 +2445,37 @@ def process_recorded_stripe_webhook_event(
 
             final_status = "processed"
 
+        elif stored_event_type == "checkout.session.expired":
+            expiration_result = (
+                expire_stripe_checkout_signup_from_event(
+                    cursor,
+                    payload,
+                    environment=environment,
+                )
+            )
+
+            final_status = (
+                "processed"
+                if expiration_result["expired"]
+                else "ignored"
+            )
+
+            cursor.execute(
+                """
+                UPDATE stripe_webhook_events
+                SET processing_status = %s,
+                    error_message = NULL,
+                    processed_at = NOW()
+                WHERE stripe_webhook_event_id = %s
+                  AND environment = %s
+                """,
+                (
+                    final_status,
+                    webhook_event_id,
+                    environment,
+                ),
+            )
+
         elif (
             stored_event_type
             in STRIPE_SUBSCRIPTION_LIFECYCLE_EVENT_TYPES
@@ -3187,7 +3297,14 @@ def sync_stripe_subscription_snapshot(
             a.stripe_billing_account_id,
             a.spa_id,
             a.stripe_customer_id,
-            st.tier_code
+            st.tier_code,
+            a.stripe_subscription_status,
+            a.trial_start,
+            a.trial_end,
+            a.cancel_at_period_end,
+            a.cancel_at,
+            a.canceled_at,
+            a.ended_at
         FROM stripe_billing_accounts a
         JOIN spas s
           ON s.spa_id = a.spa_id
@@ -3217,6 +3334,13 @@ def sync_stripe_subscription_snapshot(
         spa_id,
         stored_customer_id,
         spa_tier_code,
+        previous_status,
+        previous_trial_start,
+        previous_trial_end,
+        previous_cancel_at_period_end,
+        previous_cancel_at,
+        previous_canceled_at,
+        previous_ended_at,
     ) = billing_row
 
     spa_tier_code = str(
@@ -3662,6 +3786,117 @@ def sync_stripe_subscription_snapshot(
     psp_subscription_status = str(
         spa_status_row[0] or ""
     ).strip()
+
+    # Preserve a verified display quote only when the incoming
+    # Stripe subscription proves both pricing and lifecycle are
+    # unchanged. Missing or unsupported data remains conservative:
+    # invalidate the saved quote rather than assume it is current.
+    #
+    # The billing account is already locked by this transaction.
+    # No Stripe API call is made during this comparison.
+    lifecycle_unchanged = (
+        previous_status,
+        previous_trial_start,
+        previous_trial_end,
+        previous_cancel_at_period_end,
+        previous_cancel_at,
+        previous_canceled_at,
+        previous_ended_at,
+    ) == (
+        subscription_status,
+        trial_start,
+        trial_end,
+        cancel_at_period_end,
+        cancel_at,
+        canceled_at,
+        ended_at,
+    )
+
+    incoming_quote = None
+
+    if lifecycle_unchanged:
+        item_data = (subscription.get("items") or {}).get("data")
+
+        subscription_discounts_explicit = (
+            isinstance(subscription.get("discounts"), list)
+            or (
+                "discount" in subscription
+                and (
+                    subscription["discount"] is None
+                    or isinstance(subscription["discount"], dict)
+                )
+            )
+        )
+
+        item_discounts_explicit = (
+            isinstance(item_data, list)
+            and len(item_data) == 1
+            and isinstance(item_data[0], dict)
+            and isinstance(item_data[0].get("discounts"), list)
+        )
+
+        if (
+            subscription_discounts_explicit
+            and item_discounts_explicit
+        ):
+            try:
+                from services.stripe_billing_quote import (
+                    summarize_stripe_billing,
+                )
+                incoming_quote = summarize_stripe_billing(
+                    subscription
+                )
+            except Exception:
+                incoming_quote = None
+
+    preserve_verified_quote = False
+
+    if incoming_quote is not None:
+        cursor.execute(
+            """
+            SELECT quote_json, verified_at, invalidated_at
+            FROM stripe_billing_display_snapshots
+            WHERE stripe_billing_account_id = %s
+              AND spa_id = %s
+              AND environment = %s
+              AND stripe_subscription_id = %s
+            FOR UPDATE
+            """,
+            (
+                stripe_billing_account_id,
+                spa_id,
+                environment,
+                subscription_id,
+            ),
+        )
+        previous_quote_row = cursor.fetchone()
+
+        preserve_verified_quote = (
+            previous_quote_row is not None
+            and previous_quote_row[1] is not None
+            and previous_quote_row[2] is None
+            and previous_quote_row[0] == incoming_quote
+        )
+
+    if not preserve_verified_quote:
+        cursor.execute(
+            """
+            UPDATE stripe_billing_display_snapshots
+            SET invalidated_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE stripe_billing_account_id = %s
+              AND spa_id = %s
+              AND environment = %s
+              AND stripe_subscription_id = %s
+              AND verified_at IS NOT NULL
+            """,
+            (
+                stripe_billing_account_id,
+                spa_id,
+                environment,
+                subscription_id,
+            ),
+        )
 
     return {
         "stripe_billing_account_id": (
@@ -5540,9 +5775,9 @@ def create_stripe_checkout_signup(
         tier_code or ""
     ).strip().lower()
 
-    if tier_code != "solo":
+    if tier_code not in {"solo", "pos"}:
         raise ValueError(
-            "Solo is the only plan currently available "
+            "This subscription plan is not available "
             "for public signup."
         )
 
@@ -5688,18 +5923,46 @@ def create_stripe_checkout_signup(
             "SMS to be selected."
         )
 
-    discount_key = (
-        validate_subscription_discount_code(
-            submitted_discount_code
-        )
+    from services.stripe_trial_offers import (
+        resolve_signup_trial_offer,
     )
+
+    trial_selection = resolve_signup_trial_offer(
+        tier_code=tier_code,
+        owner_email=owner_email,
+        submitted_code=submitted_discount_code,
+    )
+
+    discount_key = validate_subscription_discount_code(
+        trial_selection["discount_code"]
+    )
+
+    if trial_selection["trial_offer_key"] is not None:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM stripe_trial_offer_redemptions
+            WHERE environment = %s
+              AND trial_offer_key = %s
+            LIMIT 1
+            """,
+            (
+                environment,
+                trial_selection["trial_offer_key"],
+            ),
+        )
+
+        if cursor.fetchone():
+            raise ValueError(
+                "Discount code is invalid."
+            )
 
     # Fail closed if the selected Solo price is not configured
     # for this Stripe environment.
     get_stripe_price_mapping(
         cursor,
         item_kind="base_plan",
-        tier_code="solo",
+        tier_code=tier_code,
         billing_interval=billing_interval,
         environment=environment,
     )
@@ -5708,7 +5971,7 @@ def create_stripe_checkout_signup(
         get_stripe_discount_mapping(
             cursor,
             discount_key=discount_key,
-            tier_code="solo",
+            tier_code=tier_code,
             billing_interval=billing_interval,
             environment=environment,
         )
@@ -5728,6 +5991,50 @@ def create_stripe_checkout_signup(
     # the Just Peachy Data Square account, so Stripe catalog
     # configuration is intentionally not required here.
 
+    # Recover only an inactive, unverified private trial signup.
+    # Never infer that a verified pending signup has no Stripe
+    # Session: the external API call precedes the PSP update.
+    # This runs on a new authorized signup request, not a timer.
+    if trial_selection["trial_offer_key"] == "katzz60":
+        cursor.execute(
+            """
+            UPDATE stripe_checkout_signups AS signup
+            SET signup_status = 'expired',
+                updated_at = NOW()
+            WHERE signup.environment = %s
+              AND LOWER(signup.owner_email) = LOWER(%s)
+              AND signup.tier_code = 'pos'
+              AND signup.trial_period_days = 60
+              AND signup.trial_offer_key = 'katzz60'
+              AND signup.signup_status = 'pending'
+              AND signup.phone_verified_at IS NULL
+              AND signup.stripe_checkout_session_id IS NULL
+              AND signup.checkout_expires_at IS NULL
+              AND signup.checkout_completed_at IS NULL
+              AND signup.stripe_customer_id IS NULL
+              AND signup.stripe_subscription_id IS NULL
+              AND GREATEST(
+                  signup.created_at,
+                  signup.updated_at,
+                  COALESCE(
+                      signup.phone_verification_window_started_at,
+                      signup.created_at
+                  ),
+                  COALESCE(
+                      signup.phone_verification_last_failed_at,
+                      signup.created_at
+                  )
+              ) <= NOW() - INTERVAL '24 hours'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM stripe_trial_offer_redemptions AS redemption
+                  WHERE redemption.environment = signup.environment
+                    AND redemption.trial_offer_key = signup.trial_offer_key
+              )
+            """,
+            (environment, owner_email),
+        )
+
     # Friendly duplicate guard before attempting the INSERT.
     # The database partial unique index remains the authoritative
     # race-condition protection for simultaneous requests.
@@ -5739,7 +6046,7 @@ def create_stripe_checkout_signup(
         FROM stripe_checkout_signups
         WHERE environment = %s
           AND LOWER(owner_email) = LOWER(%s)
-          AND tier_code = 'solo'
+          AND tier_code = %s
           AND signup_status IN (
               'pending',
               'checkout_created',
@@ -5752,6 +6059,7 @@ def create_stripe_checkout_signup(
         (
             environment,
             owner_email,
+            tier_code,
         ),
     )
 
@@ -5785,6 +6093,8 @@ def create_stripe_checkout_signup(
             sms_addon_selected,
             ten_dlc_assistance_selected,
             discount_key,
+            trial_period_days,
+            trial_offer_key,
             business_name,
             owner_first_name,
             owner_last_name,
@@ -5798,9 +6108,11 @@ def create_stripe_checkout_signup(
             %s,
             %s,
             'pending',
-            'solo',
+            %s,
             %s,
             1,
+            %s,
+            %s,
             %s,
             %s,
             %s,
@@ -5833,10 +6145,13 @@ def create_stripe_checkout_signup(
         (
             checkout_signup_token,
             environment,
+            tier_code,
             billing_interval,
             sms_addon_selected,
             ten_dlc_assistance_selected,
             discount_key,
+            trial_selection["trial_period_days"],
+            trial_selection["trial_offer_key"],
             business_name,
             owner_first_name,
             owner_last_name,
@@ -5861,7 +6176,7 @@ def create_stripe_checkout_signup(
         "checkout_signup_token": row[1],
         "created_at": row[2],
         "environment": environment,
-        "tier_code": "solo",
+        "tier_code": tier_code,
         "billing_interval": billing_interval,
         "provider_quantity": 1,
         "sms_addon_selected": sms_addon_selected,
@@ -5939,7 +6254,9 @@ def get_stripe_checkout_signup(
             provisioned_at,
             canceled_at,
             created_at,
-            updated_at
+            updated_at,
+            trial_period_days,
+            trial_offer_key
         FROM stripe_checkout_signups
         WHERE stripe_checkout_signup_id = %s
           AND environment = %s
@@ -5989,6 +6306,8 @@ def get_stripe_checkout_signup(
         "canceled_at": row[29],
         "created_at": row[30],
         "updated_at": row[31],
+        "trial_period_days": row[32],
+        "trial_offer_key": row[33],
     }
 
 
@@ -6062,6 +6381,8 @@ def create_stripe_checkout_session(
             sms_addon_selected,
             ten_dlc_assistance_selected,
             discount_key,
+            trial_period_days,
+            trial_offer_key,
             owner_email,
             terms_version,
             terms_accepted_at,
@@ -6095,6 +6416,8 @@ def create_stripe_checkout_session(
         sms_addon_selected,
         ten_dlc_assistance_selected,
         discount_key,
+        trial_period_days,
+        trial_offer_key,
         owner_email,
         terms_version,
         terms_accepted_at,
@@ -6118,19 +6441,89 @@ def create_stripe_checkout_session(
         terms_version or ""
     ).strip()
 
+    try:
+        trial_period_days = int(trial_period_days)
+    except (TypeError, ValueError) as exc:
+        raise StripeServiceError(
+            "Stripe signup trial duration is invalid."
+        ) from exc
+
+    trial_offer_key = (
+        str(trial_offer_key or "").strip().lower()
+        or None
+    )
+
+    if (
+        trial_period_days == STRIPE_SOLO_TRIAL_DAYS
+        and trial_offer_key is None
+    ):
+        pass
+    elif (
+        tier_code == "pos"
+        and trial_period_days == 60
+        and trial_offer_key == "katzz60"
+    ):
+        from services.stripe_trial_offers import (
+            resolve_signup_trial_offer,
+        )
+
+        try:
+            authorized = resolve_signup_trial_offer(
+                tier_code=tier_code,
+                owner_email=owner_email,
+                submitted_code="KATZZ60",
+            )
+        except ValueError as exc:
+            raise StripeServiceError(
+                "Extended trial is not authorized."
+            ) from exc
+
+        if (
+            authorized["trial_period_days"] != 60
+            or authorized["trial_offer_key"] != "katzz60"
+        ):
+            raise StripeServiceError(
+                "Extended trial authorization mismatch."
+            )
+    else:
+        raise StripeServiceError(
+            "Unsupported Stripe signup trial selection."
+        )
+
     if signup_environment != environment:
         raise StripeServiceError(
             "Stripe signup environment does not match."
         )
 
-    if tier_code != "solo":
+    if trial_offer_key is not None:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM stripe_trial_offer_redemptions
+            WHERE environment = %s
+              AND trial_offer_key = %s
+            LIMIT 1
+            """,
+            (
+                environment,
+                trial_offer_key,
+            ),
+        )
+
+        if cursor.fetchone():
+            raise StripeServiceError(
+                "This private trial offer has already "
+                "been redeemed."
+            )
+
+    if tier_code not in {"solo", "pos"}:
         raise StripeServiceError(
-            "Only Solo may use this Checkout flow."
+            "This subscription plan is not available for Checkout."
         )
 
     if int(provider_quantity or 0) != 1:
         raise StripeServiceError(
-            "Solo Checkout requires exactly one provider."
+            "Stripe Checkout requires exactly one initial provider."
         )
 
     billing_interval = (
@@ -6271,7 +6664,7 @@ def create_stripe_checkout_session(
     base_price = get_stripe_price_mapping(
         cursor,
         item_kind="base_plan",
-        tier_code="solo",
+        tier_code=tier_code,
         billing_interval=billing_interval,
         environment=environment,
     )
@@ -6315,7 +6708,7 @@ def create_stripe_checkout_session(
             get_stripe_discount_mapping(
                 cursor,
                 discount_key=discount_key,
-                tier_code="solo",
+                tier_code=tier_code,
                 billing_interval=billing_interval,
                 environment=environment,
             )
@@ -6349,9 +6742,7 @@ def create_stripe_checkout_session(
         "payment_method_collection": "always",
         "metadata": metadata,
         "subscription_data": {
-            "trial_period_days": (
-                STRIPE_SOLO_TRIAL_DAYS
-            ),
+            "trial_period_days": trial_period_days,
             "trial_settings": {
                 "end_behavior": {
                     "missing_payment_method": "cancel",
@@ -6540,4 +6931,218 @@ def create_stripe_checkout_session(
         "expires_at": checkout_expires_at,
         "status": checkout_data.get("status"),
         "existing": False,
+    }
+
+
+def expire_stripe_checkout_signup_from_event(
+    cursor,
+    event,
+    *,
+    environment=None,
+):
+    """Release an unredeemed private offer after verified expiry.
+
+    The caller supplies an authenticated Stripe webhook event.
+    This function participates in the caller's transaction.
+    """
+    environment = normalize_stripe_environment(
+        environment or get_stripe_environment()
+    )
+
+    if not isinstance(event, dict):
+        raise StripeServiceError(
+            "Stripe expiration payload is invalid."
+        )
+
+    if (
+        not str(event.get("id") or "").strip()
+        or event.get("type") != "checkout.session.expired"
+        or event.get("livemode") is not (environment == "live")
+    ):
+        raise StripeServiceError(
+            "Stripe Checkout expiration event is invalid."
+        )
+
+    data = event.get("data")
+    if not isinstance(data, dict):
+        raise StripeServiceError(
+            "Stripe expiration event data is invalid."
+        )
+
+    session = data.get("object")
+    if not isinstance(session, dict):
+        raise StripeServiceError(
+            "Stripe expiration Session is invalid."
+        )
+
+    session_id = str(session.get("id") or "").strip()
+
+    if (
+        session.get("object") != "checkout.session"
+        or session.get("status") != "expired"
+        or not session_id
+    ):
+        raise StripeServiceError(
+            "Stripe Checkout Session is not expired."
+        )
+
+    metadata = session.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        raise StripeServiceError(
+            "Stripe expiration metadata is invalid."
+        )
+
+    token = str(
+        metadata.get("psp_checkout_signup_token") or ""
+    ).strip()
+
+    # Other Stripe Checkout workflows remain unchanged.
+    if not token:
+        return {"expired": False, "reason": "not_signup"}
+
+    # A session claiming to be a PSP signup must use
+    # subscription mode, even when the event is signed.
+    if session.get("mode") != "subscription":
+        raise StripeServiceError(
+            "PSP signup Checkout must use subscription mode."
+        )
+
+    reference = str(
+        session.get("client_reference_id") or ""
+    ).strip()
+
+    if reference != token:
+        raise StripeServiceError(
+            "Expired Checkout signup reference mismatch."
+        )
+
+    cursor.execute(
+        """
+        SELECT
+            stripe_checkout_signup_id,
+            signup_status,
+            tier_code,
+            trial_period_days,
+            trial_offer_key,
+            stripe_checkout_session_id
+        FROM stripe_checkout_signups
+        WHERE environment = %s
+          AND checkout_signup_token = %s
+        FOR UPDATE
+        """,
+        (environment, token),
+    )
+
+    row = cursor.fetchone()
+
+    if not row:
+        raise StripeServiceError(
+            "Expired Checkout has no matching PSP signup."
+        )
+
+    (
+        signup_id,
+        signup_status,
+        tier_code,
+        trial_days,
+        offer_key,
+        stored_session_id,
+    ) = row
+
+    if str(stored_session_id or "").strip() != session_id:
+        raise StripeServiceError(
+            "Expired Stripe Session does not match PSP."
+        )
+
+    signup_status = str(
+        signup_status or ""
+    ).strip().lower()
+
+    tier_code = str(tier_code or "").strip().lower()
+    offer_key = str(offer_key or "").strip().lower()
+
+    # Preserve the previous handling of ordinary signups.
+    if not offer_key:
+        return {"expired": False, "reason": "standard_trial"}
+
+    if not (
+        tier_code == "pos"
+        and trial_days == 60
+        and offer_key == "katzz60"
+    ):
+        raise StripeServiceError(
+            "Expired Checkout trial selection is invalid."
+        )
+
+    if signup_status in {
+        "checkout_completed",
+        "provisioned",
+        "expired",
+        "canceled",
+        "error",
+    }:
+        return {
+            "expired": False,
+            "reason": "already_final",
+            "stripe_checkout_signup_id": signup_id,
+        }
+
+    if signup_status != "checkout_created":
+        raise StripeServiceError(
+            "Private trial signup is not checkout-ready."
+        )
+
+    cursor.execute(
+        """
+        SELECT 1
+        FROM stripe_trial_offer_redemptions
+        WHERE environment = %s
+          AND trial_offer_key = %s
+        LIMIT 1
+        """,
+        (environment, offer_key),
+    )
+
+    if cursor.fetchone():
+        raise StripeServiceError(
+            "Redeemed private trial cannot be released."
+        )
+
+    cursor.execute(
+        """
+        UPDATE stripe_checkout_signups
+        SET signup_status = 'expired',
+            updated_at = NOW()
+        WHERE stripe_checkout_signup_id = %s
+          AND environment = %s
+          AND signup_status = 'checkout_created'
+          AND stripe_checkout_session_id = %s
+          AND trial_offer_key = %s
+          AND NOT EXISTS (
+              SELECT 1
+              FROM stripe_trial_offer_redemptions
+              WHERE environment = %s
+                AND trial_offer_key = %s
+          )
+        RETURNING stripe_checkout_signup_id
+        """,
+        (
+            signup_id,
+            environment,
+            session_id,
+            offer_key,
+            environment,
+            offer_key,
+        ),
+    )
+
+    if cursor.fetchone() is None:
+        raise StripeServiceError(
+            "Private trial reservation was not released."
+        )
+
+    return {
+        "expired": True,
+        "reason": "stripe_session_expired",
+        "stripe_checkout_signup_id": signup_id,
     }

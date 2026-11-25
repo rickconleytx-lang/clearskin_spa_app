@@ -27,6 +27,13 @@ PUBLIC_WEBSITE_DEFAULTS = {
     "show_promotional_section": False,
     "promotional_heading": "",
     "promotional_text": "",
+    "show_events_locations": False,
+    "events_locations_heading": "Where to Find Us",
+    "events_locations_intro": (
+        "Find our food trucks at these upcoming events and locations!"
+    ),
+    "events_locations_show_directions": True,
+    "events_locations_show_daily_hours": True,
     "show_about_section": True,
     "about_heading": "About Our Business",
     "about_description": (
@@ -55,6 +62,81 @@ PUBLIC_WEBSITE_DEFAULTS = {
     "appointment_contact_email": "",
     "appointment_contact_phone": "",
 }
+
+
+
+PEACHPOS_WEBSITE_STYLE_DEFAULTS = {
+    "general": {
+        "website_tagline": "Something for Everyone.",
+        "hero_description": (
+            "Discover our products, offerings, and what "
+            "makes our business special."
+        ),
+        "intro_heading": "Discover what makes us different",
+        "intro_description": (
+            "Explore our offerings and find what fits "
+            "your needs."
+        ),
+        "about_description": (
+            "We're proud to offer quality products and "
+            "experiences for our customers."
+        ),
+    },
+    "food": {
+        "website_tagline": "Fresh Food. Great Moments.",
+        "hero_description": (
+            "Explore our menu and discover what's cooking!"
+        ),
+        "intro_heading": "Great food, made for you",
+        "intro_description": (
+            "Browse our food and drink options and "
+            "discover something delicious."
+        ),
+        "about_description": (
+            "We love serving great food and bringing "
+            "people together."
+        ),
+    },
+    "retail": {
+        "website_tagline": "Discover Something Great.",
+        "hero_description": (
+            "Browse our products and explore what "
+            "we have to offer."
+        ),
+        "intro_heading": "Find your next favorite",
+        "intro_description": (
+            "Discover products selected with our "
+            "customers in mind."
+        ),
+        "about_description": (
+            "We're here to help you find products "
+            "you'll love."
+        ),
+    },
+}
+
+
+def resolve_peachpos_website_defaults(settings, style):
+    """
+    Adapt only recognizable default text for PeachPOS.
+
+    Custom text is preserved. This function does not
+    write to the database or mutate the original dict.
+    """
+    defaults = PEACHPOS_WEBSITE_STYLE_DEFAULTS
+    selected = defaults.get(style, defaults["general"])
+    resolved = dict(settings)
+
+    for field, replacement in selected.items():
+        known_defaults = {
+            PUBLIC_WEBSITE_DEFAULTS[field],
+            *(values[field] for values in defaults.values()),
+        }
+
+        if resolved.get(field) in known_defaults:
+            resolved[field] = replacement
+
+    return resolved
 
 
 DEFAULT_CLIENT_STATUSES = (
@@ -1152,6 +1234,22 @@ def _provision_new_business_record(
     )
 
     spa_id = cursor.fetchone()[0]
+
+    # Assign every newly provisioned business a $2.00 monthly
+    # Coach Peach allowance. AI remains disabled until explicitly
+    # enabled through the existing Master Admin controls.
+    cursor.execute(
+        """
+        INSERT INTO psp_ai_budgets (
+            scope,
+            spa_id,
+            ai_enabled,
+            monthly_limit_usd
+        )
+        VALUES ('business', %s, FALSE, 2.00)
+        """,
+        (spa_id,),
+    )
 
     ensure_owner_employee_role(
         cursor,

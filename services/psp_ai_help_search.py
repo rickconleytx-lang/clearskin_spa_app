@@ -14,6 +14,10 @@ STOP_WORDS = {
     "where", "with", "you", "your", "it", "this", "that", "please",
     "como", "con", "de", "del", "el", "en", "la", "las", "los", "para",
     "por", "que", "una", "uno", "un", "y", "mi", "mis", "puedo",
+    "all", "any", "have", "has", "if", "so",
+    "them", "four", "about", "using",
+    "tengo", "cuatro", "todos", "cómo",
+
 }
 
 # Common verbs do not, by themselves, establish what product topic is relevant.
@@ -22,7 +26,18 @@ GENERIC_ACTIONS = {
     "add", "complete", "create", "enter", "find", "help", "make", "open",
     "record", "review", "see", "send", "set", "show", "use", "view",
     "want", "need", "up", "start", "go", "change", "manage", "new",
+    "administrar", "administrando",
+    "registrar", "registro",
+
 }
+
+# Product names provide context, but should not outweigh
+# a customer's actual question about a specific feature.
+# Preserve product-only questions through the fallback below.
+PRODUCT_CONTEXT_TERMS = {
+    "coach", "peach", "suite", "pro", "peachpos", "psp",
+}
+
 
 # Explicit, small synonym groups keep queries like "send emails" and
 # "Square reconciliation" usable without an external search/AI call.
@@ -42,6 +57,25 @@ SYNONYM_GROUPS = (
     {"expense", "expenses"},
     {"report", "reports"},
     {"event", "events"},
+    {"remind", "reminded", "reminding", "reminder", "reminders"},
+    {"renew", "renewed", "renewing", "renewal", "renewals"},
+    {"expire", "expires", "expired", "expiring",
+     "expiration", "expirations", "expiry"},
+    {"file", "filed", "filing", "filings"},
+    {"subscription", "subscriptions"},
+    {"license", "licenses"},
+    {"date", "dates"},
+    {"deadline", "deadlines"},
+    {"truck", "trucks"},
+    {"unit", "units"},
+    {"manage", "manages", "managed",
+     "managing", "management"},
+    {"camión", "camiones"},
+    {"unidad", "unidades"},
+    {"administrar", "administra",
+     "administrando", "administración"},
+    {"registrar", "registro", "registros"},
+
 )
 
 # A direct "send email" question is better answered by the general email
@@ -74,6 +108,71 @@ def _question_terms(question):
         if word not in STOP_WORDS and (len(word) >= 3 or word in {"ai", "pos"})
     }
     return _expand(words)
+
+
+
+# Ignore conversational filler and common application names
+# when a customer asks about a specific feature.
+QUESTION_FILLER_WORDS = frozenset({
+    "me", "when", "let", "know", "there",
+    "anyway", "way", "sure", "be", "tell",
+    "needs", "needing",
+})
+
+
+def _meaningful_query_words(question):
+    words = {
+        word for word in _words(question)
+        if word not in STOP_WORDS
+        and (len(word) >= 3 or word in {"ai", "pos"})
+        and word not in QUESTION_FILLER_WORDS
+    }
+
+    distinct_topics = (
+        words - PRODUCT_CONTEXT_TERMS - GENERIC_ACTIONS - {"ai"}
+    )
+
+    if distinct_topics:
+        words -= PRODUCT_CONTEXT_TERMS
+
+    question_text = " ".join(
+        str(question).casefold().split()
+    )
+
+    notification_intent = any(
+        phrase in question_text
+        for phrase in (
+            "let me know when",
+            "tell me when",
+            "notify me when",
+            "alert me when",
+        )
+    )
+
+    time_related_terms = {
+        "renewal", "expiration", "filing", "due",
+        "deadline", "lease", "license", "tax",
+        "insurance", "date", "dates",
+        "event", "events",
+    }
+
+    has_time_subject = bool(
+        _expand(words) & time_related_terms
+    )
+
+    remembering_intent = bool(
+        words & {
+            "remember", "remembering",
+            "forget", "forgot", "forgotten",
+        }
+    )
+
+    if has_time_subject and (
+        notification_intent or remembering_intent
+    ):
+        words.add("remind")
+
+    return words
 
 
 class _VisibleText(HTMLParser):
@@ -122,14 +221,25 @@ def search_ai_help_articles(
         raise ValueError("Invalid article search limit.")
 
     language = "ES" if language == "ES" else "EN"
-    original = {
-        w for w in _words(question)
-        if w not in STOP_WORDS and (len(w) >= 3 or w in {"ai", "pos"})
-    }
-    terms = _expand(original)
-    subject_words = original - GENERIC_ACTIONS
-    if not subject_words:
-        subject_words = original
+    original = _meaningful_query_words(question)
+    # Prioritize the requested subject over repeated
+    # product-brand references in unrelated articles.
+    subject_words = (
+        original - GENERIC_ACTIONS - PRODUCT_CONTEXT_TERMS
+    )
+
+    if subject_words:
+        terms = _expand(
+            original - PRODUCT_CONTEXT_TERMS
+        )
+    else:
+        # Product-only and generic questions must
+        # continue to work normally.
+        terms = _expand(original)
+        subject_words = (
+            original - GENERIC_ACTIONS or original
+        )
+
     subject_terms = _expand(subject_words)
     if not terms:
         return []

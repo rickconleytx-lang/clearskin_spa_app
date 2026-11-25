@@ -203,6 +203,12 @@ from services.provisioning_service import (
     provision_new_business,
     provision_new_business_for_owner_invitation,
 )
+from services.provisioning_service import resolve_peachpos_website_defaults
+from services.peachweb_events_settings import (
+    load_event_settings,
+    parse_event_settings_form,
+    save_event_settings,
+)
 
 
 # --------------------------------------------------
@@ -681,6 +687,11 @@ def inject_navigation_access_context():
             payroll_navigation_available
         ),
 
+        "navigation_subscription_tier_code": (
+            current_subscription_tier_code()
+            if role_code is not None
+            else None
+        ),
         "subscription_entitlements": (
             subscription_entitlements
         ),
@@ -3045,6 +3056,28 @@ def coach_peach_help_api():
             ),
         }), 400
 
+    # Coach Peach's optional, local Happy Hour Easter egg.
+    # All existing authentication, CSRF, enablement and
+    # request-validation checks have already passed.
+    # No article retrieval, AI reservation, or provider call.
+    from services.psp_ai_help_easter_eggs import (
+        get_coach_peach_easter_egg,
+    )
+
+    special_answer = get_coach_peach_easter_egg(
+        question=question,
+        language=get_current_language(),
+    )
+
+    if special_answer is not None:
+        response = jsonify({
+            "success": True,
+            "answer": special_answer,
+            "articles": [],
+        })
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     spa_id, business_unit_id, user_id = identity
     model, pricing_id = settings
 
@@ -4140,8 +4173,9 @@ def _load_public_support_category(
               AND BTRIM(hp.content) <> ''
 
             ORDER BY
-                ht.display_order NULLS LAST,
-                hp.title
+                LOWER(hp.title),
+                hp.title,
+                ht.page_key
             """,
             (
                 language_code,
@@ -4962,7 +4996,8 @@ def _resolve_public_website_host(hostname):
                 COALESCE(
                     bs.public_booking_enabled,
                     FALSE
-                )
+                ),
+                st.tier_code
 
             FROM public_website_domains pwd
 
@@ -4976,6 +5011,9 @@ def _resolve_public_website_host(hostname):
               ON s.spa_id =
                     pwd.spa_id
 
+            LEFT JOIN subscription_tiers st
+              ON st.subscription_tier_id =
+                    s.subscription_tier_id
             LEFT JOIN booking_settings bs
               ON bs.spa_id =
                     pwd.spa_id
@@ -5011,6 +5049,7 @@ def _resolve_public_website_host(hostname):
 
         return {
             "spa_id": row[0],
+            "tier_code": str(row[7] or "").strip().lower(),
             "business_unit_id": row[1],
             "hostname": row[2],
             "spa_name": spa_name,
@@ -5369,6 +5408,47 @@ def _load_public_website_content(tenant):
                     ),
             })
 
+        cur.execute(
+            '''
+            SELECT website_display_name, website_display_initials
+            FROM public_website_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+            ''',
+            (spa_id, business_unit_id),
+        )
+        name_row = cur.fetchone()
+        website_settings["website_display_name"] = (
+            str(name_row[0] or "").strip()
+            if name_row else ""
+        )
+
+        website_settings["website_display_initials"] = (
+            str(name_row[1] or "").strip()
+            if name_row else ""
+        )
+        if tenant["tier_code"] == "pos":
+            cur.execute(
+                """
+                SELECT website_display_style
+                FROM public_website_settings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                LIMIT 1
+                """,
+                (spa_id, business_unit_id),
+            )
+            style_row = cur.fetchone()
+            selected_style = (
+                style_row[0] if style_row else "general"
+            )
+            website_settings["website_display_style"] = (
+                selected_style
+                if selected_style in ("general", "food", "retail")
+                else "general"
+            )
+
         cur.execute("""
             SELECT
                 snt.service_name,
@@ -5545,20 +5625,69 @@ def _render_public_tenant_home(tenant):
         )
     )
 
+    if tenant["tier_code"] == "pos":
+        content["website_settings"] = (
+            resolve_peachpos_website_defaults(
+                content["website_settings"],
+                content["website_settings"].get(
+                    "website_display_style",
+                    "general",
+                ),
+            )
+        )
+
+    public_events_section = None
+
+    if tenant["tier_code"] == "pos":
+        from services.peachweb_public_section import (
+            load_public_events_section,
+        )
+
+        events_conn = get_db_connection()
+
+        try:
+            events_conn.set_session(readonly=True)
+            events_cursor = events_conn.cursor()
+
+            try:
+                public_events_section = load_public_events_section(
+                    events_cursor,
+                    tenant=tenant,
+                )
+            finally:
+                events_cursor.close()
+        finally:
+            events_conn.rollback()
+            events_conn.close()
+
     return render_template(
         "public_site/tenant_home.html",
 
         business_name=
             tenant["business_name"],
 
-        business_initials=
-            tenant["business_initials"],
+        business_initials=(
+            content["website_settings"].get(
+                "website_display_initials"
+            )
+            or _build_business_initials(
+                content["website_settings"].get(
+                    "website_display_name"
+                )
+                or tenant["business_name"]
+            )
+        ),
 
+        is_peachpos=(
+            tenant["tier_code"] == "pos"
+        ),
         public_booking_slug=
             tenant["public_booking_slug"],
 
-        public_booking_enabled=
-            tenant["public_booking_enabled"],
+        public_booking_enabled=(
+            tenant["public_booking_enabled"]
+            and tenant["tier_code"] != "pos"
+        ),
 
         website_settings=
             content["website_settings"],
@@ -5577,9 +5706,94 @@ def _render_public_tenant_home(tenant):
                 "additional_menu_items"
             ],
 
+        public_events_section=public_events_section,
         website_links=
             content["website_links"],
     )
+
+
+def _load_public_marketing_products():
+    """Use published product revisions only; retain static fallback on error."""
+    from services.psp_marketing_cms_public_product import (
+        load_published_products,
+    )
+
+    conn = None
+    products = {}
+    try:
+        conn = get_db_connection()
+        products = load_published_products(conn)
+    except Exception:
+        app.logger.exception(
+            "Published marketing product lookup unavailable; "
+            "retaining existing public product cards."
+        )
+        products = {}
+    finally:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                app.logger.exception(
+                    "Published marketing product read rollback failed."
+                )
+                products = {}
+            try:
+                conn.close()
+            except Exception:
+                app.logger.exception(
+                    "Published marketing product connection close failed."
+                )
+                products = {}
+
+    return products
+
+
+def _load_public_marketing_intro(section_key):
+    """Read a published introduction with static-copy fallback."""
+    from services.psp_marketing_cms_public_intro import (
+        load_published_intro,
+    )
+
+    conn = None
+    published_intro = None
+
+    try:
+        conn = get_db_connection()
+        published_intro = load_published_intro(
+            conn,
+            section_key=section_key,
+        )
+    except Exception:
+        app.logger.exception(
+            "Published marketing introduction unavailable "
+            "for %s; retaining existing public wording.",
+            section_key,
+        )
+        published_intro = None
+    finally:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                app.logger.exception(
+                    "Marketing introduction read rollback "
+                    "failed for %s.",
+                    section_key,
+                )
+                published_intro = None
+
+            try:
+                conn.close()
+            except Exception:
+                app.logger.exception(
+                    "Marketing introduction connection "
+                    "close failed for %s.",
+                    section_key,
+                )
+                published_intro = None
+
+    return published_intro
 
 
 @app.before_request
@@ -5602,13 +5816,92 @@ def route_public_marketing_site():
         return None
 
     if request.path == "/":
-        return render_template(
-            "public_site/psp_home.html",
-            contact_csrf_token=(
+        from services.psp_marketing_cms_service import (
+            load_home_state,
+        )
+
+        published_hero = None
+        conn = None
+
+        try:
+            conn = get_db_connection()
+            state = load_home_state(conn)
+
+            # Never use draft_content for public rendering.
+            published = state["published_content"]
+
+            if published is not None:
+                hero = (
+                    published.get("hero")
+                    if isinstance(published, dict)
+                    else None
+                )
+
+                limits = {
+                    "primary_button_text": 80,
+                    "secondary_button_text": 80,
+                    "pricing_sentence": 300,
+                }
+
+                if (
+                    not isinstance(hero, dict)
+                    or set(hero) != set(limits)
+                    or any(
+                        not isinstance(hero[key], str)
+                        or not hero[key].strip()
+                        or len(hero[key]) > limit
+                        or "<" in hero[key]
+                        or ">" in hero[key]
+                        or any(
+                            ord(char) < 32
+                            or ord(char) == 127
+                            for char in hero[key]
+                        )
+                        for key, limit in limits.items()
+                    )
+                ):
+                    raise ValueError(
+                        "Invalid stored published Home Page content."
+                    )
+
+                published_hero = hero
+
+        except Exception:
+            app.logger.exception(
+                "Published marketing Home Page unavailable; "
+                "using existing website wording."
+            )
+
+        finally:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    app.logger.exception(
+                        "Marketing Home Page read rollback failed."
+                    )
+
+                try:
+                    conn.close()
+                except Exception:
+                    app.logger.exception(
+                        "Marketing Home Page connection close failed."
+                    )
+
+        context = {
+            "contact_csrf_token": (
                 _public_security_csrf_token(
                     "public_contact"
                 )
             ),
+        }
+
+        if published_hero is not None:
+            context["cms_home_hero"] = published_hero
+
+        return render_template(
+            "public_site/psp_home.html",
+            **context,
         )
 
     if request.path in {
@@ -5616,7 +5909,11 @@ def route_public_marketing_site():
         "/subscription-packages/",
     }:
         return render_template(
-            "public_site/psp_packages.html"
+            "public_site/psp_packages.html",
+            cms_products=_load_public_marketing_products(),
+            cms_intro=_load_public_marketing_intro(
+                "packages.intro"
+            ),
         )
 
     if request.path in {
@@ -5624,7 +5921,11 @@ def route_public_marketing_site():
         "/pricing/",
     }:
         return render_template(
-            "public_site/psp_pricing.html"
+            "public_site/psp_pricing.html",
+            cms_products=_load_public_marketing_products(),
+            cms_intro=_load_public_marketing_intro(
+                "pricing.intro"
+            ),
         )
 
     if request.path in {
@@ -7272,16 +7573,66 @@ def master_admin_business_detail(spa_id):
             for tier_row in cur.fetchall()
         ]
 
-        return render_template(
-            "master_admin/businesses/business_detail.html",
-            business=business,
-            subscription_tiers=subscription_tiers,
-            security_csrf_token=_security_form_csrf_token(),
+        from services.stripe_billing_snapshot import (
+            load_billing_snapshot,
+        )
+
+        billing_snapshot = load_billing_snapshot(
+            cur,
+            spa_id=spa_id,
+            environment=environment,
+            timezone_name=get_current_spa_timezone(spa_id),
         )
 
     finally:
         cur.close()
         conn.close()
+
+    billing_details = (
+        billing_snapshot.get("billing_details")
+        if billing_snapshot else None
+    )
+
+    return render_template(
+        "master_admin/businesses/business_detail.html",
+        business=business,
+        billing_details=billing_details,
+        billing_snapshot=billing_snapshot,
+        subscription_tiers=subscription_tiers,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/businesses/<int:spa_id>/billing/refresh",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def refresh_master_admin_business_billing(spa_id):
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    from services.stripe_billing_refresh import (
+        run_billing_refresh,
+    )
+
+    result = run_billing_refresh(
+        connection_factory=get_db_connection,
+        spa_id=spa_id,
+        environment=get_stripe_environment(),
+        mode="manual",
+    )
+
+    _flash_billing_refresh_result(result["status"])
+
+    return redirect(
+        url_for("master_admin_business_detail", spa_id=spa_id)
+    )
+
+
 
 
 @app.route(
@@ -37251,9 +37602,25 @@ def send_compliant_sms(
             "send_compliant_sms requires business_unit_id."
         )
 
+    # Enforce the current version of business messaging terms
+    # at the transmission boundary, not only in UI routes.
+    if not sms_email_terms_accepted(spa_id):
+        raise PermissionError(
+            "The current SMS and Email Terms and Conditions "
+            "must be accepted before sending customer SMS."
+        )
+
     sms_permissions = get_sms_business_permissions(
         spa_id
     )
+
+    # Every customer SMS requires active service approval,
+    # including messages classified as marketing.
+    if not sms_permissions.get("service_sms_enabled", False):
+        raise PermissionError(
+            sms_permissions.get("reason")
+            or "SMS service is currently unavailable."
+        )
 
     print(
         "[SMS COMPLIANCE CHECK]",
@@ -39658,6 +40025,11 @@ def build_navigation_access(role_code):
 
         # Main business categories
         "can_view_calendar": False,
+
+        # Event Calendar permissions
+        "can_view_events": False,
+        "can_manage_events": False,
+        "can_manage_event_units": False,
         "can_view_communications": False,
         "can_view_clients": False,
         "can_view_inventory": False,
@@ -39678,6 +40050,7 @@ def build_navigation_access(role_code):
         # Booking and appointment operations
         "can_manage_booking_imports": False,
         "can_manage_online_booking": False,
+        "can_manage_public_website": False,
 
         # Communications permissions
         "can_send_sms": False,
@@ -39716,6 +40089,9 @@ def build_navigation_access(role_code):
             "can_view_business_summary": True,
 
             "can_view_calendar": True,
+            "can_view_events": True,
+            "can_manage_events": True,
+            "can_manage_event_units": True,
             "can_view_clients": True,
             "can_view_inventory": True,
             "can_view_employees": True,
@@ -39732,6 +40108,7 @@ def build_navigation_access(role_code):
 
             "can_manage_booking_imports": True,
             "can_manage_online_booking": True,
+            "can_manage_public_website": True,
 
             # Communications
             "can_send_sms": True,
@@ -39816,6 +40193,28 @@ def current_workspace_access():
 #
 #####################################
 
+
+
+
+def require_peachbook_subscription_access(view_function):
+    """
+    Restrict PeachBook operations to subscriptions with
+    appointments, explicitly excluding PeachPOS.
+    """
+    from functools import wraps
+
+    @wraps(view_function)
+    def wrapped_view(*args, **kwargs):
+        if not is_master_admin():
+            if (
+                current_subscription_tier_code() == "pos"
+                or not has_subscription_feature("appointments")
+            ):
+                abort(403)
+
+        return view_function(*args, **kwargs)
+
+    return wrapped_view
 
 
 
@@ -40182,6 +40581,31 @@ BUSINESS_ONBOARDING_SETUP_STEPS = (
 )
 
 
+PEACHPOS_ONBOARDING_SETUP_STEPS = (
+    {
+        "key": "pos_inventory",
+        "title": "Products and Inventory",
+        "endpoint": "add_inventory_product",
+    },
+    {
+        "key": "public_website_settings",
+        "title": "PeachWeb Website Settings",
+        "endpoint": "public_website_settings",
+    },
+    {
+        "key": "website_menu_items",
+        "title": "PeachWeb Menu Items",
+        "endpoint": "public_website_menu_items",
+    },
+    {
+        "key": "website_links",
+        "title": "PeachWeb Business and Social Links",
+        "endpoint": "public_website_links",
+    },
+)
+
+
+
 def _business_onboarding_setup_progress(
     cur,
     *,
@@ -40227,10 +40651,24 @@ def _business_onboarding_setup_progress(
         for row in cur.fetchall()
     }
 
+    subscription_summary = get_business_subscription_summary(
+        cur,
+        spa_id=spa_id,
+    )
+    tier_code = str(
+        subscription_summary.get("tier_code") or ""
+    ).strip().lower()
+
+    step_definitions = (
+        PEACHPOS_ONBOARDING_SETUP_STEPS
+        if tier_code == "pos"
+        else BUSINESS_ONBOARDING_SETUP_STEPS
+    )
+
     steps = []
 
     for position, definition in enumerate(
-        BUSINESS_ONBOARDING_SETUP_STEPS,
+        step_definitions,
         start=1,
     ):
         stored = stored_steps.get(
@@ -40273,6 +40711,12 @@ def _business_onboarding_setup_progress(
     return {
         "business_onboarding_id": onboarding[0],
         "business_unit_id": initial_business_unit_id,
+        "tier_code": tier_code,
+        "coming_soon": (
+            ["Event Calendar"]
+            if tier_code == "pos"
+            else []
+        ),
         "steps": steps,
         "completed_count": completed_count,
         "total_count": len(steps),
@@ -40288,9 +40732,36 @@ def _complete_business_onboarding_step(
     step_key,
     user_id,
 ):
+    # Determine the step list from the onboarding business,
+    # not from user-supplied form data.
+    cur.execute(
+        """
+        SELECT st.tier_code
+        FROM business_onboarding bo
+        JOIN spas s
+          ON s.spa_id = bo.spa_id
+        LEFT JOIN subscription_tiers st
+          ON st.subscription_tier_id = s.subscription_tier_id
+        WHERE bo.business_onboarding_id = %s
+        """,
+        (business_onboarding_id,),
+    )
+
+    tier_row = cur.fetchone()
+    if not tier_row:
+        raise ValueError("Business onboarding record not found.")
+
+    tier_code = str(tier_row[0] or "").strip().lower()
+
+    step_definitions = (
+        PEACHPOS_ONBOARDING_SETUP_STEPS
+        if tier_code == "pos"
+        else BUSINESS_ONBOARDING_SETUP_STEPS
+    )
+
     valid_step_keys = {
         step["key"]
-        for step in BUSINESS_ONBOARDING_SETUP_STEPS
+        for step in step_definitions
     }
 
     if step_key not in valid_step_keys:
@@ -40758,11 +41229,30 @@ def current_subscription_terms_version():
 
 
 _STRIPE_SIGNUP_SESSION_KEY = "_stripe_checkout_signup"
+
+_STRIPE_SIGNUP_SESSION_KEYS = {
+    "solo": _STRIPE_SIGNUP_SESSION_KEY,
+    "pos": "_stripe_checkout_signup_pos",
+}
 _STRIPE_SIGNUP_CSRF_PURPOSE = "stripe_checkout_signup"
+
+
+def _stripe_signup_session_key(tier_code):
+    tier = str(tier_code or "").strip().lower()
+    key = _STRIPE_SIGNUP_SESSION_KEYS.get(tier)
+
+    if not key:
+        raise ValueError(
+            "Unsupported Stripe signup subscription tier."
+        )
+
+    return key
 
 
 def _set_stripe_signup_session(
     stripe_checkout_signup_id,
+    *,
+    tier_code="solo",
 ):
     try:
         signup_id = int(
@@ -40780,14 +41270,15 @@ def _set_stripe_signup_session(
 
     # Keep public signup PII out of the signed browser session.
     # Only the server-side database identifier is retained.
-    session[_STRIPE_SIGNUP_SESSION_KEY] = {
+    session[_stripe_signup_session_key(tier_code)] = {
         "stripe_checkout_signup_id": signup_id,
     }
 
 
-def _stripe_signup_session_id():
+def _stripe_signup_session_id(*, tier_code="solo"):
+    session_key = _stripe_signup_session_key(tier_code)
     state = session.get(
-        _STRIPE_SIGNUP_SESSION_KEY
+        session_key
     )
 
     if not isinstance(state, dict):
@@ -40801,14 +41292,14 @@ def _stripe_signup_session_id():
         )
     except (TypeError, ValueError):
         session.pop(
-            _STRIPE_SIGNUP_SESSION_KEY,
+            session_key,
             None,
         )
         return None
 
     if signup_id <= 0:
         session.pop(
-            _STRIPE_SIGNUP_SESSION_KEY,
+            session_key,
             None,
         )
         return None
@@ -40816,9 +41307,9 @@ def _stripe_signup_session_id():
     return signup_id
 
 
-def _clear_stripe_signup_session():
+def _clear_stripe_signup_session(*, tier_code="solo"):
     session.pop(
-        _STRIPE_SIGNUP_SESSION_KEY,
+        _stripe_signup_session_key(tier_code),
         None,
     )
 
@@ -40849,7 +41340,11 @@ def _render_stripe_signup(
     form_values=None,
     error_message=None,
     success_message=None,
+    tier_code="solo",
 ):
+    if tier_code not in {"solo", "pos"}:
+        abort(404)
+
     form_values = dict(
         form_values or {}
     )
@@ -40866,7 +41361,11 @@ def _render_stripe_signup(
         )
 
     return render_template(
-        "signup/solo_signup.html",
+        (
+            "signup/pos_signup.html"
+            if tier_code == "pos"
+            else "signup/solo_signup.html"
+        ),
         signup_stage=signup_stage,
         signup_record=signup_record,
         form_values=form_values,
@@ -40882,8 +41381,10 @@ def _render_stripe_signup(
     )
 
 
-def _load_current_stripe_signup():
-    signup_id = _stripe_signup_session_id()
+def _load_current_stripe_signup(*, tier_code="solo"):
+    signup_id = _stripe_signup_session_id(
+        tier_code=tier_code
+    )
 
     if signup_id is None:
         return None
@@ -40901,20 +41402,30 @@ def _load_current_stripe_signup():
         cur.close()
         conn.close()
 
-    if not signup_record:
-        _clear_stripe_signup_session()
+    if (
+        not signup_record
+        or str(signup_record.get("tier_code") or "").strip().lower()
+        != str(tier_code or "").strip().lower()
+    ):
+        _clear_stripe_signup_session(
+            tier_code=tier_code
+        )
         return None
 
     return signup_record
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>",
+    methods=["GET", "POST"],
+)
+@app.route(
     "/signup/solo",
     methods=["GET", "POST"],
 )
-def stripe_signup():
+def stripe_signup(tier_code="solo"):
     existing_signup = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if request.method == "GET":
@@ -40926,21 +41437,24 @@ def stripe_signup():
                     "checkout_created",
                 }
             ):
-                _clear_stripe_signup_session()
+                _clear_stripe_signup_session(tier_code=tier_code)
 
             elif existing_signup["phone_verified_at"]:
                 return _render_stripe_signup(
+                    tier_code=tier_code,
                     signup_stage="phone_verified",
                     signup_record=existing_signup,
                 )
 
             else:
                 return _render_stripe_signup(
+                    tier_code=tier_code,
                     signup_stage="verify_phone",
                     signup_record=existing_signup,
                 )
 
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="signup",
             form_values={
                 "billing_interval": "month",
@@ -40966,7 +41480,7 @@ def stripe_signup():
         and existing_signup["signup_status"] == "pending"
     ):
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     form_values = {
@@ -41104,7 +41618,7 @@ def stripe_signup():
                 ),
                 terms_version=terms_version,
                 terms_accepted=terms_accepted,
-                tier_code="solo",
+                tier_code=tier_code,
             )
 
             conn.commit()
@@ -41122,13 +41636,15 @@ def stripe_signup():
         StripeServiceError,
     ) as exc:
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="signup",
             form_values=form_values,
             error_message=str(exc),
         ), 400
 
     _set_stripe_signup_session(
-        signup["stripe_checkout_signup_id"]
+        signup["stripe_checkout_signup_id"],
+        tier_code=tier_code,
     )
 
     delivery = (
@@ -41142,11 +41658,12 @@ def stripe_signup():
     )
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if delivery["status"] == "sent":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             success_message=(
@@ -41161,6 +41678,7 @@ def stripe_signup():
         "locked",
     }:
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41170,6 +41688,7 @@ def stripe_signup():
         ), 429
 
     return _render_stripe_signup(
+        tier_code=tier_code,
         signup_stage="verify_phone",
         signup_record=signup_record,
         error_message=(
@@ -41180,10 +41699,14 @@ def stripe_signup():
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>/send-phone-code",
+    methods=["POST"],
+)
+@app.route(
     "/signup/solo/send-phone-code",
     methods=["POST"],
 )
-def stripe_signup_send_phone_code():
+def stripe_signup_send_phone_code(tier_code="solo"):
     submitted_token = request.form.get(
         "csrf_token",
         "",
@@ -41196,24 +41719,24 @@ def stripe_signup_send_phone_code():
         abort(400)
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if not signup_record:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["signup_status"] != "pending":
-        _clear_stripe_signup_session()
+        _clear_stripe_signup_session(tier_code=tier_code)
 
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["phone_verified_at"]:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     delivery = (
@@ -41227,11 +41750,12 @@ def stripe_signup_send_phone_code():
     )
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if delivery["status"] == "sent":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             success_message=(
@@ -41249,6 +41773,7 @@ def stripe_signup_send_phone_code():
         )
 
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41260,6 +41785,7 @@ def stripe_signup_send_phone_code():
 
     if delivery["status"] == "hourly_limit":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41270,6 +41796,7 @@ def stripe_signup_send_phone_code():
 
     if delivery["status"] == "locked":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41280,10 +41807,11 @@ def stripe_signup_send_phone_code():
 
     if delivery["status"] == "already_verified":
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     return _render_stripe_signup(
+        tier_code=tier_code,
         signup_stage="verify_phone",
         signup_record=signup_record,
         error_message=(
@@ -41294,10 +41822,14 @@ def stripe_signup_send_phone_code():
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>/verify-phone",
+    methods=["POST"],
+)
+@app.route(
     "/signup/solo/verify-phone",
     methods=["POST"],
 )
-def stripe_signup_verify_phone():
+def stripe_signup_verify_phone(tier_code="solo"):
     submitted_token = request.form.get(
         "csrf_token",
         "",
@@ -41310,24 +41842,24 @@ def stripe_signup_verify_phone():
         abort(400)
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if not signup_record:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["signup_status"] != "pending":
-        _clear_stripe_signup_session()
+        _clear_stripe_signup_session(tier_code=tier_code)
 
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["phone_verified_at"]:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     verification_code = str(
@@ -41366,12 +41898,12 @@ def stripe_signup_verify_phone():
         conn.close()
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if verification["verified"]:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     reason = verification.get(
@@ -41388,6 +41920,7 @@ def stripe_signup_verify_phone():
         )
 
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41405,6 +41938,7 @@ def stripe_signup_verify_phone():
 
     if reason == "locked":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41416,6 +41950,7 @@ def stripe_signup_verify_phone():
 
     if reason == "challenge_unavailable":
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="verify_phone",
             signup_record=signup_record,
             error_message=(
@@ -41425,6 +41960,7 @@ def stripe_signup_verify_phone():
         ), 400
 
     return _render_stripe_signup(
+        tier_code=tier_code,
         signup_stage="verify_phone",
         signup_record=signup_record,
         error_message=(
@@ -41436,10 +41972,14 @@ def stripe_signup_verify_phone():
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>/checkout",
+    methods=["POST"],
+)
+@app.route(
     "/signup/solo/checkout",
     methods=["POST"],
 )
-def stripe_signup_checkout():
+def stripe_signup_checkout(tier_code="solo"):
     submitted_token = request.form.get(
         "csrf_token",
         "",
@@ -41452,37 +41992,37 @@ def stripe_signup_checkout():
         abort(400)
 
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     if not signup_record:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if signup_record["signup_status"] not in {
         "pending",
         "checkout_created",
     }:
-        _clear_stripe_signup_session()
+        _clear_stripe_signup_session(tier_code=tier_code)
 
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     if not signup_record["phone_verified_at"]:
         return redirect(
-            url_for("stripe_signup")
+            url_for("stripe_signup", tier_code=tier_code)
         )
 
     base_url = _password_reset_base_url()
 
     success_url = (
-        f"{base_url}/signup/solo/success"
+        f"{base_url}/signup/{tier_code}/success"
     )
 
     cancel_url = (
-        f"{base_url}/signup/solo"
+        f"{base_url}/signup/{tier_code}"
     )
 
     conn = get_db_connection()
@@ -41507,6 +42047,7 @@ def stripe_signup_checkout():
         conn.rollback()
 
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="phone_verified",
             signup_record=signup_record,
             error_message=(
@@ -41530,6 +42071,7 @@ def stripe_signup_checkout():
 
     if not checkout_url:
         return _render_stripe_signup(
+            tier_code=tier_code,
             signup_stage="phone_verified",
             signup_record=signup_record,
             error_message=(
@@ -41876,12 +42418,16 @@ def stripe_webhook():
 
 
 @app.route(
+    "/signup/<any(pos):tier_code>/success",
+    methods=["GET"],
+)
+@app.route(
     "/signup/solo/success",
     methods=["GET"],
 )
-def stripe_signup_success():
+def stripe_signup_success(tier_code="solo"):
     signup_record = (
-        _load_current_stripe_signup()
+        _load_current_stripe_signup(tier_code=tier_code)
     )
 
     # Stripe Checkout has returned control to PSP. Keep the
@@ -41891,9 +42437,10 @@ def stripe_signup_success():
     #
     # Backend duplicate protection remains authoritative and will
     # reject another active signup for the same owner email.
-    _clear_stripe_signup_session()
+    _clear_stripe_signup_session(tier_code=tier_code)
 
     return _render_stripe_signup(
+        tier_code=tier_code,
         signup_stage="checkout_returned",
         signup_record=signup_record,
     )
@@ -44379,14 +44926,99 @@ def system_activity():
             category,
             severity,
             message,
-            created_at
+            spa_id,
+            related_type,
+            related_id,
+            system_logs.created_at,
+            details.failure_reason AS login_failure_reason,
+            details.login_channel,
+            details.attempted_email_masked,
+            details.attempted_email_ciphertext,
+            details.browser_family AS login_browser_family,
+            details.platform_family AS login_platform_family
         FROM system_logs
+        LEFT JOIN security_login_attempt_details AS details
+          ON details.system_log_id = system_logs.log_id
         {where_sql}
-        ORDER BY created_at DESC
+        ORDER BY system_logs.created_at DESC
         LIMIT %s OFFSET %s
     """, params + [per_page, offset])
 
     logs = cur.fetchall()
+
+    # System Activity timestamps are stored in UTC.
+    # Display them in Central Time for Master Admin.
+    from datetime import timezone as _activity_utc
+    from zoneinfo import ZoneInfo as _ActivityZoneInfo
+
+    _activity_zone = _ActivityZoneInfo("America/Chicago")
+
+    for log in logs:
+        _activity_time = log["created_at"]
+        if _activity_time.tzinfo is None:
+            _activity_time = _activity_time.replace(
+                tzinfo=_activity_utc.utc
+            )
+        log["created_at_central"] = (
+            _activity_time.astimezone(_activity_zone)
+        )
+
+    from services.security_login_email_crypto import (
+        LoginEmailCryptoError,
+        decrypt_attempted_email,
+    )
+
+    for log in logs:
+        ciphertext = log.pop(
+            "attempted_email_ciphertext",
+            None,
+        )
+
+        log["attempted_email_display"] = (
+            log.get("attempted_email_masked")
+            or "Unavailable"
+        )
+
+        if ciphertext:
+            try:
+                log["attempted_email_display"] = (
+                    decrypt_attempted_email(
+                        ciphertext,
+                        system_log_id=int(log["log_id"]),
+                    )
+                )
+            except LoginEmailCryptoError:
+                # Keep the masked fallback; never expose
+                # ciphertext or encryption error details.
+                pass
+
+    affected_spa_ids = sorted({
+        int(log["spa_id"])
+        for log in logs
+        if log["spa_id"] is not None
+    })
+
+    business_names = {}
+
+    if affected_spa_ids:
+        cur.execute(
+            """
+            SELECT spa_id, spa_name
+            FROM spas
+            WHERE spa_id = ANY(%s)
+            """,
+            (affected_spa_ids,),
+        )
+
+        business_names = {
+            row["spa_id"]: row["spa_name"]
+            for row in cur.fetchall()
+        }
+
+    for log in logs:
+        log["affected_business_name"] = (
+            business_names.get(log["spa_id"])
+        )
 
     cur.execute("""
         SELECT DISTINCT category
@@ -44407,7 +45039,7 @@ def system_activity():
     cur.close()
     conn.close()
 
-    return render_template(
+    response = app.make_response(render_template(
         "system_activity.html",
         logs=logs,
         categories=categories,
@@ -44421,7 +45053,10 @@ def system_activity():
         system_health_cards=system_health_cards,
         monitoring_settings=monitoring_settings,
         security_csrf_token=security_csrf_token
-    )
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.route(
@@ -46094,7 +46729,7 @@ def update_dropdown_labels():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    "can_manage_public_website"
 )
 def public_website_about_photo():
     spa_id = current_spa_id()
@@ -46430,7 +47065,7 @@ def public_website_about_photo():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def public_website_settings():
     spa_id = current_spa_id()
@@ -46438,6 +47073,18 @@ def public_website_settings():
 
     if not business_unit_id:
         abort(403)
+
+    if request.method == "POST" and not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(403)
+
+    from flask import g
+    g.peachweb_settings_csrf_token = _security_form_csrf_token()
+
+    is_peachpos = (
+        current_subscription_tier_code() == "pos"
+    )
 
     onboarding_requested = (
         request.args.get("onboarding") == "1"
@@ -46460,6 +47107,9 @@ def public_website_settings():
                 request.form.get("action")
                 or "save"
             ).strip().lower()
+
+            if is_peachpos and action == "reset":
+                abort(403)
 
             if action == "reset":
                 defaults = (
@@ -46828,6 +47478,69 @@ def public_website_settings():
                     ).strip(),
                 }
 
+                if is_peachpos:
+                    # Preserve fields excluded from PeachPOS.
+                    # Ignore client-submitted values for them.
+                    protected_fields = (
+                        "services_heading",
+                        "services_description",
+                        "show_services_two_section",
+                        "services_two_heading",
+                        "services_two_description",
+                        "show_services_three_section",
+                        "services_three_heading",
+                        "services_three_description",
+                        "booking_heading",
+                        "booking_description",
+                        "appointment_contact_email",
+                        "appointment_contact_phone",
+                    )
+
+                    cur.execute(
+                        "SELECT "
+                        + ", ".join(protected_fields)
+                        + " FROM public_website_settings "
+                          "WHERE spa_id = %s "
+                          "AND business_unit_id = %s "
+                          "LIMIT 1",
+                        (spa_id, business_unit_id),
+                    )
+                    existing_row = cur.fetchone()
+
+                    if existing_row is None:
+                        preserved = {
+                            field: PUBLIC_WEBSITE_DEFAULTS.get(
+                                field,
+                                False if field.startswith("show_")
+                                else "",
+                            )
+                            for field in protected_fields
+                        }
+                    else:
+                        preserved = dict(
+                            zip(protected_fields, existing_row)
+                        )
+
+                    settings.update(preserved)
+
+                    # Preserve previously saved Events settings
+                    # when an older form omits the new controls.
+                    if "events_locations_heading" in request.form:
+                        try:
+                            event_settings = parse_event_settings_form(
+                                request.form
+                            )
+                        except ValueError as exc:
+                            abort(400, description=str(exc))
+                    else:
+                        event_settings = load_event_settings(
+                            cur,
+                            spa_id=spa_id,
+                            business_unit_id=business_unit_id,
+                        )
+
+                    settings.update(event_settings)
+
                 allowed_color_schemes = {
                     "peach_cream",
                     "coastal_blue",
@@ -46902,6 +47615,15 @@ def public_website_settings():
                     ),
                 }
 
+                if is_peachpos:
+                    for field in (
+                        "services_heading",
+                        "services_description",
+                        "booking_heading",
+                        "booking_description",
+                    ):
+                        field_rules.pop(field, None)
+
                 for field_name, rule in field_rules.items():
                     field_label = rule[0]
                     maximum_length = rule[1]
@@ -46955,6 +47677,9 @@ def public_website_settings():
                         "Services Three",
                     ),
                 )
+
+                if is_peachpos:
+                    service_section_rules = ()
 
                 for (
                     show_field,
@@ -47262,6 +47987,57 @@ def public_website_settings():
 
 
 
+            submitted_initials = (
+                request.form.get("website_display_initials")
+                or ""
+            ).strip().upper()
+
+            if submitted_initials and (
+                len(submitted_initials) > 4
+                or not all(
+                    ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+                    for ch in submitted_initials
+                )
+            ):
+                abort(
+                    400,
+                    description="Business Initials must be 1-4 letters or numbers."
+                )
+
+            submitted_name = (
+                request.form.get("website_display_name") or ""
+            ).strip()
+
+            if len(submitted_name) > 180:
+                abort(400, description="Business Name is too long.")
+
+            cur.execute(
+                '''
+                SELECT COALESCE(
+                    NULLIF(BTRIM(bu.unit_name), ''),
+                    NULLIF(BTRIM(s.spa_name), ''),
+                    'Business'
+                )
+                FROM business_units bu
+                JOIN spas s ON s.spa_id = bu.spa_id
+                WHERE bu.spa_id = %s
+                  AND bu.business_unit_id = %s
+                LIMIT 1
+                ''',
+                (spa_id, business_unit_id),
+            )
+            registered_name_row = cur.fetchone()
+            if registered_name_row is None:
+                abort(403)
+
+            # Keep the automatic fallback unless a different
+            # public website name was actually selected.
+            stored_website_name = (
+                submitted_name
+                if submitted_name
+                and submitted_name != registered_name_row[0]
+                else None
+            )
             cur.execute("""
                 INSERT INTO public_website_settings (
                     spa_id,
@@ -47429,6 +48205,55 @@ def public_website_settings():
                 ],
             ))
 
+            if is_peachpos:
+                selected_style = (
+                    request.form.get("website_display_style")
+                    or "general"
+                ).strip().lower()
+
+                if selected_style not in (
+                    "general", "food", "retail"
+                ):
+                    abort(400)
+
+                cur.execute(
+                    """
+                    UPDATE public_website_settings
+                    SET website_display_style = %s
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                    """,
+                    (
+                        selected_style,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+                if cur.rowcount != 1:
+                    raise RuntimeError(
+                        "Website display style was not saved"
+                    )
+
+                save_event_settings(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    settings=event_settings,
+                )
+
+            cur.execute(
+                '''
+                UPDATE public_website_settings
+                SET website_display_name = %s,
+                    website_display_initials = %s
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                ''',
+                (stored_website_name, submitted_initials or None, spa_id, business_unit_id),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("Website Business Name was not saved")
             conn.commit()
 
             flash(
@@ -47538,6 +48363,76 @@ def public_website_settings():
                 PUBLIC_WEBSITE_DEFAULTS.copy()
             )
 
+        if is_peachpos:
+            cur.execute(
+                """
+                SELECT website_display_style
+                FROM public_website_settings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                """,
+                (spa_id, business_unit_id),
+            )
+            style_row = cur.fetchone()
+            settings["website_display_style"] = (
+                style_row[0] if style_row else "general"
+            )
+
+            settings.update(
+                load_event_settings(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                )
+            )
+
+        cur.execute(
+            '''
+            SELECT
+                COALESCE(
+                    NULLIF(BTRIM(bu.unit_name), ''),
+                    NULLIF(BTRIM(s.spa_name), ''),
+                    'Business'
+                ),
+                pws.website_display_name,
+                pws.website_display_initials
+            FROM business_units bu
+            JOIN spas s ON s.spa_id = bu.spa_id
+            LEFT JOIN public_website_settings pws
+              ON pws.spa_id = bu.spa_id
+             AND pws.business_unit_id = bu.business_unit_id
+            WHERE bu.spa_id = %s
+              AND bu.business_unit_id = %s
+            LIMIT 1
+            ''',
+            (spa_id, business_unit_id),
+        )
+        website_name_row = cur.fetchone()
+        if website_name_row is None:
+            abort(403)
+
+        settings["website_display_name"] = (
+            str(website_name_row[1] or "").strip()
+            or website_name_row[0]
+        )
+        settings["website_display_initials"] = (
+            str(website_name_row[2] or "").strip()
+        )
+        settings["website_auto_initials"] = (
+            _build_business_initials(
+                settings["website_display_name"]
+            )
+        )
+
+        if is_peachpos:
+            settings = resolve_peachpos_website_defaults(
+                settings,
+                settings.get(
+                    "website_display_style",
+                    "general",
+                ),
+            )
+
     finally:
         cur.close()
         conn.close()
@@ -47579,7 +48474,7 @@ def public_website_settings():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def complete_public_website_settings_onboarding():
     spa_id = current_spa_id()
@@ -47641,6 +48536,14 @@ def complete_public_website_settings_onboarding():
         "success",
     )
 
+    if current_subscription_tier_code() == "pos":
+        return redirect(
+            url_for(
+                "public_website_menu_items",
+                onboarding=1,
+            )
+        )
+
     return redirect(
         url_for(
             "booking_control_center",
@@ -47655,11 +48558,83 @@ def complete_public_website_settings_onboarding():
 #
 ############################################
 
+@app.route(
+    "/public-website-menu-items/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission('can_manage_public_website')
+def complete_website_menu_items_onboarding():
+    if current_subscription_tier_code() != "pos":
+        abort(403)
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(token):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            abort(403)
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="website_menu_items",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "PeachWeb Menu Items setup reviewed. "
+        "You can add or update menu items anytime.",
+        "success",
+    )
+
+    return redirect(
+        url_for("public_website_links", onboarding=1)
+    )
+
+
 @app.route("/public-website-menu-items")
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def public_website_menu_items():
     spa_id = current_spa_id()
@@ -47667,6 +48642,11 @@ def public_website_menu_items():
 
     if not business_unit_id:
         abort(403)
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+    )
+
 
     status_filter = (
         request.args.get("status")
@@ -47764,13 +48744,50 @@ def public_website_menu_items():
         else ""
     )
 
+    is_peachpos = (
+        current_subscription_tier_code() == "pos"
+    )
+    website_display_style = "general"
+
+    if is_peachpos:
+        style_conn = get_db_connection()
+        style_cur = style_conn.cursor()
+        try:
+            style_cur.execute(
+                """
+                SELECT website_display_style
+                FROM public_website_settings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                LIMIT 1
+                """,
+                (spa_id, business_unit_id),
+            )
+            style_row = style_cur.fetchone()
+            if (
+                style_row
+                and style_row[0] in ("general", "food", "retail")
+            ):
+                website_display_style = style_row[0]
+        finally:
+            style_cur.close()
+            style_conn.close()
+
     return render_template(
         "public_website_menu_items.html",
+        is_peachpos=is_peachpos,
+        website_display_style=website_display_style,
         menu_items=menu_items,
         status_filter=status_filter,
         active_count=active_count,
         hidden_count=hidden_count,
-        public_menu_url=public_menu_url
+        public_menu_url=public_menu_url,
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        )
     )
 
 
@@ -47781,7 +48798,7 @@ def public_website_menu_items():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def add_public_website_menu_item():
     from decimal import Decimal, InvalidOperation
@@ -47989,7 +49006,7 @@ def add_public_website_menu_item():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def edit_public_website_menu_item(
     menu_item_id
@@ -48240,7 +49257,7 @@ def edit_public_website_menu_item(
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def toggle_public_website_menu_item(
     menu_item_id
@@ -48331,7 +49348,7 @@ def toggle_public_website_menu_item(
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def public_website_links():
     spa_id = current_spa_id()
@@ -48461,7 +49478,7 @@ def public_website_links():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def complete_website_links_onboarding():
     spa_id = current_spa_id()
@@ -48517,6 +49534,19 @@ def complete_website_links_onboarding():
         cur.close()
         conn.close()
 
+    if current_subscription_tier_code() == "pos":
+        flash(
+            "PeachPOS setup complete. "
+            "Your workspace is ready to use.",
+            "success",
+        )
+        return redirect(
+            url_for(
+                "morning_briefing",
+                setup_complete=1,
+            )
+        )
+
     flash(
         "Peach Suite Pro setup complete. "
         "Your workspace is ready to use.",
@@ -48538,7 +49568,7 @@ def complete_website_links_onboarding():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def add_public_website_link():
     spa_id = current_spa_id()
@@ -48750,7 +49780,7 @@ def add_public_website_link():
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def edit_public_website_link(
     public_website_link_id
@@ -49001,7 +50031,7 @@ def edit_public_website_link(
 @login_required
 @spa_required
 @require_workspace_permission(
-    "can_manage_online_booking"
+    'can_manage_public_website'
 )
 def toggle_public_website_link(
     public_website_link_id
@@ -62389,12 +63419,48 @@ def manage_subscription():
                 spa_id=spa_id,
             )
         )
+        from services.stripe_billing_snapshot import (
+            load_billing_snapshot,
+        )
+
+        billing_snapshot = load_billing_snapshot(
+            cur,
+            spa_id=spa_id,
+            environment=get_stripe_environment(),
+            timezone_name=get_current_spa_timezone(spa_id),
+        )
+
     finally:
         cur.close()
         conn.close()
 
+    from services.stripe_billing_quote import (
+        utc_to_business_time,
+    )
+
+    business_timezone = get_current_spa_timezone(spa_id)
+
+    billing_details = (
+        billing_snapshot.get("billing_details")
+        if billing_snapshot else None
+    )
+
+    trial_end_local = utc_to_business_time(
+        subscription_summary.get("trial_end"),
+        business_timezone,
+    )
+
+    current_period_end_local = utc_to_business_time(
+        subscription_summary.get("current_period_end"),
+        business_timezone,
+    )
+
     return render_template(
         "manage_subscription.html",
+        billing_details=billing_details,
+        billing_snapshot=billing_snapshot,
+        trial_end_local=trial_end_local,
+        current_period_end_local=current_period_end_local,
         subscription_summary=subscription_summary,
         open_resubscription=open_resubscription,
         subscription_terms_version=(
@@ -62402,6 +63468,70 @@ def manage_subscription():
         ),
         security_csrf_token=_security_form_csrf_token(),
     )
+
+
+@app.route("/account/subscription/billing/refresh", methods=["POST"])
+@login_required
+@spa_required
+def refresh_customer_subscription_billing():
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    from services.stripe_billing_refresh import (
+        run_billing_refresh,
+    )
+
+    result = run_billing_refresh(
+        connection_factory=get_db_connection,
+        spa_id=current_spa_id(),
+        environment=get_stripe_environment(),
+        mode="manual",
+    )
+
+    _flash_billing_refresh_result(result["status"])
+
+    return redirect(url_for("manage_subscription"))
+
+
+def _flash_billing_refresh_result(status):
+    messages = {
+        "verified": (
+            "Billing information refreshed successfully.",
+            "success",
+        ),
+        "cooldown": (
+            "Billing was refreshed recently. Please try again shortly.",
+            "info",
+        ),
+        "busy": (
+            "A billing refresh is already in progress.",
+            "info",
+        ),
+        "no_subscription": (
+            "No Stripe subscription is available to refresh.",
+            "warning",
+        ),
+        "unavailable": (
+            "Stripe billing information could not be verified. "
+            "Previously verified information has been preserved.",
+            "warning",
+        ),
+    }
+
+    message, category = messages.get(
+        status,
+        ("Billing refresh could not be completed.", "warning"),
+    )
+    flash(message, category)
+
 
 
 
@@ -63509,6 +64639,2923 @@ def master_admin_ai_financial():
     finally:
         cur.close()
         conn.close()
+
+
+@app.route(
+    "/master-admin/website/home/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_save_draft():
+    """Save private Home Page content without publishing it."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        save_home_draft,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor_id = session.get("user_id")
+    try:
+        if isinstance(raw_actor_id, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor_id)
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+        expected_revision = int(raw_expected)
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    content = {
+        "hero": {
+            "primary_button_text": request.form.get(
+                "primary_button_text", ""
+            ),
+            "secondary_button_text": request.form.get(
+                "secondary_button_text", ""
+            ),
+            "pricing_sentence": request.form.get(
+                "pricing_sentence", ""
+            ),
+        }
+    }
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = save_home_draft(
+                conn,
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer Home Page draft exists. "
+                "Reload and review it before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Home Page draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+    return redirect(
+        url_for("master_admin_website_management")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/promotion/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_promotion_save_draft():
+    """Save a private Home Page promotion revision only."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        save_section_draft,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    content = {
+        "promotion": {
+            "product_label": request.form.get(
+                "product_label", ""
+            ),
+            "headline": request.form.get(
+                "headline", ""
+            ),
+            "monthly_price": request.form.get(
+                "monthly_price", ""
+            ),
+            "pricing_description": request.form.get(
+                "pricing_description", ""
+            ),
+            "features": [
+                request.form.get(f"feature_{i}", "")
+                for i in range(1, 10)
+            ],
+        }
+    }
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = save_section_draft(
+                conn,
+                section_key="home.promo",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer Product Promotion draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_promotion_editor")
+            )
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_promotion_editor")
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Product Promotion draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_promotion_editor")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/published",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_home_published():
+    """Open the published Home Page in local development."""
+    from flask import make_response
+    from urllib.parse import urlsplit
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+    from services.psp_marketing_cms_content import (
+        normalize_home_content,
+    )
+
+    hostname = urlsplit(
+        "http://" + request.host
+    ).hostname
+
+    # Production must open the real public marketing website.
+    # Never redirect local development to Production.
+    if hostname not in ("127.0.0.1", "localhost", "::1"):
+        return redirect(
+            "https://peachsuitepro.com/",
+            code=302,
+        )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    published_id = state["published_revision_id"]
+    published_content = state["published_content"]
+
+    if (
+        (published_id is None)
+        != (published_content is None)
+    ):
+        abort(500)
+
+    context = {
+        "contact_csrf_token": (
+            _public_security_csrf_token(
+                "public_contact"
+            )
+        ),
+    }
+
+    # Never read draft_content into the published viewer.
+    if published_content is not None:
+        context["cms_home_hero"] = (
+            normalize_home_content(
+                published_content
+            )["hero"]
+        )
+
+    response = make_response(
+        render_template(
+            "public_site/psp_home.html",
+            **context,
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/promotion",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_promotion_editor():
+    """Display the independent private promotion editor."""
+    from services.psp_marketing_cms_content import (
+        normalize_home_promotion_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key="home.promo",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        promotion = normalize_home_promotion_content(
+            state["draft_content"]
+        )["promotion"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        promotion = normalize_home_promotion_content(
+            state["published_content"]
+        )["promotion"]
+        content_source = "published content"
+
+    else:
+        promotion = {
+            "product_label": "Solo",
+            "headline": (
+                "One business. One owner. "
+                "One connected system."
+            ),
+            "monthly_price": "$49",
+            "pricing_description": (
+                "Or $490/year. Start with a 10-day free trial."
+            ),
+            "features": [
+                "Client Management",
+                "Appointment Calendar",
+                "PeachBook",
+                "PeachWeb",
+                "Income & Expenses",
+                "Inventory",
+                "Coach Peach",
+                "Square Integration",
+                "Import & Export",
+            ],
+        }
+        content_source = "existing website wording"
+
+    return render_template(
+        "master_admin_website_promotion.html",
+        promotion=promotion,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/home/peachweb/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachweb_save_draft():
+    """Save a private PeachWeb caption, retaining trusted image data."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+        normalize_home_peachweb_content,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSConfigurationError,
+        MarketingCMSNotFound,
+        load_section_state,
+        save_section_draft,
+    )
+    from services.psp_marketing_cms_cloudinary import (
+        upload_showcase_image,
+    )
+    from services.psp_marketing_cms_media import (
+        MarketingCMSImageError,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    allowed_fields = {
+        "security_csrf_token",
+        "expected_draft_revision_id",
+        "caption",
+        "image_alt",
+    }
+    if set(request.form.keys()) - allowed_fields:
+        abort(400)
+
+    if set(request.files.keys()) - {"showcase_image"}:
+        abort(400)
+
+    uploaded_file = (
+        request.files["showcase_image"]
+        if "showcase_image" in request.files
+        else None
+    )
+    has_upload = (
+        uploaded_file is not None
+        and bool(getattr(uploaded_file, "filename", ""))
+    )
+
+    if has_upload and "image_alt" not in request.form:
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor)
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    if has_upload and not CLOUDINARY_CONFIGURED:
+        flash(
+            "Marketing picture storage is not configured. "
+            "No draft was saved.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_peachweb_editor")
+        )
+
+    conn = get_db_connection()
+    draft_saved = False
+
+    try:
+        try:
+            if has_upload:
+                # Hold this section's row lock across the upload and
+                # the subsequent draft save. Reject stale requests
+                # before any external Cloudinary operation.
+                if conn.autocommit:
+                    raise MarketingCMSConfigurationError(
+                        "Image saving requires a database transaction."
+                    )
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT draft_revision_id
+                        FROM psp_marketing_page_state
+                        WHERE page_key = %s
+                        FOR UPDATE
+                        """,
+                        ("home.peachweb",),
+                    )
+                    locked_row = cur.fetchone()
+
+                if locked_row is None:
+                    raise MarketingCMSNotFound(
+                        "PeachWeb Showcase state is missing."
+                    )
+
+                if locked_row[0] != expected_revision:
+                    raise MarketingCMSConflict(
+                        "This PeachWeb draft has changed."
+                    )
+
+            state = load_section_state(
+                conn,
+                section_key="home.peachweb",
+            )
+
+            if (
+                has_upload
+                and state["draft_revision_id"] != expected_revision
+            ):
+                raise MarketingCMSConflict(
+                    "This PeachWeb draft has changed."
+                )
+
+            if state["draft_content"] is not None:
+                stored_content = state["draft_content"]
+            else:
+                stored_content = state["published_content"]
+
+            if stored_content is not None:
+                trusted_showcase = normalize_home_peachweb_content(
+                    stored_content
+                )["showcase"]
+            else:
+                trusted_showcase = {
+                    "image_public_id": "",
+                    "image_url": "",
+                    "image_alt": "",
+                    "caption": "",
+                }
+
+            candidate = {
+                **trusted_showcase,
+                "caption": request.form.get("caption", ""),
+            }
+
+            if has_upload:
+                # Validation-only reference. It is never uploaded,
+                # saved, or returned to the browser.
+                validation_id = (
+                    "peach-suite-pro/marketing-cms/showcases/"
+                    "peachweb/" + "0" * 32
+                )
+
+                candidate.update({
+                    "image_public_id": validation_id,
+                    "image_url": (
+                        "https://res.cloudinary.com/validation/"
+                        "image/upload/v1/"
+                        f"{validation_id}.jpg"
+                    ),
+                    "image_alt": request.form.get(
+                        "image_alt", ""
+                    ),
+                })
+
+            elif "image_alt" in request.form:
+                # Editing the existing image description does not
+                # permit changing its stored image reference.
+                candidate["image_alt"] = request.form["image_alt"]
+
+            content = normalize_home_peachweb_content({
+                "showcase": candidate,
+            })
+
+            if has_upload:
+                try:
+                    asset = upload_showcase_image(
+                        uploaded_file,
+                        "peachweb",
+                    )
+                except MarketingCMSImageError as exc:
+                    flash(str(exc), "error")
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachweb_editor"
+                        )
+                    )
+                except Exception:
+                    import logging
+                    logging.exception(
+                        "PeachWeb marketing picture upload failed"
+                    )
+                    flash(
+                        "Picture upload failed. "
+                        "No draft was saved. Please try again.",
+                        "error",
+                    )
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachweb_editor"
+                        )
+                    )
+
+                # Only the storage service supplies these values.
+                content["showcase"]["image_public_id"] = (
+                    asset["public_id"]
+                )
+                content["showcase"]["image_url"] = (
+                    asset["secure_url"]
+                )
+
+                content = normalize_home_peachweb_content(content)
+
+            result = save_section_draft(
+                conn,
+                section_key="home.peachweb",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+            draft_saved = True
+
+        except MarketingCMSConflict:
+            flash(
+                "A newer PeachWeb Showcase draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_peachweb_editor")
+            )
+
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_peachweb_editor")
+            )
+
+    finally:
+        try:
+            if not draft_saved:
+                conn.rollback()
+        finally:
+            conn.close()
+
+    flash(
+        "PeachWeb Showcase draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_peachweb_editor")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/peachbook/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachbook_save_draft():
+    """Save a private PeachBook caption, retaining trusted image data."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+        normalize_home_peachbook_content,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSConfigurationError,
+        MarketingCMSNotFound,
+        load_section_state,
+        save_section_draft,
+    )
+    from services.psp_marketing_cms_cloudinary import (
+        upload_showcase_image,
+    )
+    from services.psp_marketing_cms_media import (
+        MarketingCMSImageError,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    allowed_fields = {
+        "security_csrf_token",
+        "expected_draft_revision_id",
+        "caption",
+        "image_alt",
+    }
+    if set(request.form.keys()) - allowed_fields:
+        abort(400)
+
+    if set(request.files.keys()) - {"showcase_image"}:
+        abort(400)
+
+    uploaded_file = (
+        request.files["showcase_image"]
+        if "showcase_image" in request.files
+        else None
+    )
+    has_upload = (
+        uploaded_file is not None
+        and bool(getattr(uploaded_file, "filename", ""))
+    )
+
+    if has_upload and "image_alt" not in request.form:
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor)
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    if has_upload and not CLOUDINARY_CONFIGURED:
+        flash(
+            "Marketing picture storage is not configured. "
+            "No draft was saved.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_peachbook_editor")
+        )
+
+    conn = get_db_connection()
+    draft_saved = False
+
+    try:
+        try:
+            if has_upload:
+                # Hold this section's row lock across the upload and
+                # the subsequent draft save. Reject stale requests
+                # before any external Cloudinary operation.
+                if conn.autocommit:
+                    raise MarketingCMSConfigurationError(
+                        "Image saving requires a database transaction."
+                    )
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT draft_revision_id
+                        FROM psp_marketing_page_state
+                        WHERE page_key = %s
+                        FOR UPDATE
+                        """,
+                        ("home.peachbook",),
+                    )
+                    locked_row = cur.fetchone()
+
+                if locked_row is None:
+                    raise MarketingCMSNotFound(
+                        "PeachBook Showcase state is missing."
+                    )
+
+                if locked_row[0] != expected_revision:
+                    raise MarketingCMSConflict(
+                        "This PeachBook draft has changed."
+                    )
+
+            state = load_section_state(
+                conn,
+                section_key="home.peachbook",
+            )
+
+            if (
+                has_upload
+                and state["draft_revision_id"] != expected_revision
+            ):
+                raise MarketingCMSConflict(
+                    "This PeachBook draft has changed."
+                )
+
+            if state["draft_content"] is not None:
+                stored_content = state["draft_content"]
+            else:
+                stored_content = state["published_content"]
+
+            if stored_content is not None:
+                trusted_showcase = normalize_home_peachbook_content(
+                    stored_content
+                )["showcase"]
+            else:
+                trusted_showcase = {
+                    "image_public_id": "",
+                    "image_url": "",
+                    "image_alt": "",
+                    "caption": "",
+                }
+
+            candidate = {
+                **trusted_showcase,
+                "caption": request.form.get("caption", ""),
+            }
+
+            if has_upload:
+                # Validation-only reference. It is never uploaded,
+                # saved, or returned to the browser.
+                validation_id = (
+                    "peach-suite-pro/marketing-cms/showcases/"
+                    "peachbook/" + "0" * 32
+                )
+
+                candidate.update({
+                    "image_public_id": validation_id,
+                    "image_url": (
+                        "https://res.cloudinary.com/validation/"
+                        "image/upload/v1/"
+                        f"{validation_id}.jpg"
+                    ),
+                    "image_alt": request.form.get(
+                        "image_alt", ""
+                    ),
+                })
+
+            elif "image_alt" in request.form:
+                # Editing the existing image description does not
+                # permit changing its stored image reference.
+                candidate["image_alt"] = request.form["image_alt"]
+
+            content = normalize_home_peachbook_content({
+                "showcase": candidate,
+            })
+
+            if has_upload:
+                try:
+                    asset = upload_showcase_image(
+                        uploaded_file,
+                        "peachbook",
+                    )
+                except MarketingCMSImageError as exc:
+                    flash(str(exc), "error")
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachbook_editor"
+                        )
+                    )
+                except Exception:
+                    import logging
+                    logging.exception(
+                        "PeachBook marketing picture upload failed"
+                    )
+                    flash(
+                        "Picture upload failed. "
+                        "No draft was saved. Please try again.",
+                        "error",
+                    )
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachbook_editor"
+                        )
+                    )
+
+                # Only the storage service supplies these values.
+                content["showcase"]["image_public_id"] = (
+                    asset["public_id"]
+                )
+                content["showcase"]["image_url"] = (
+                    asset["secure_url"]
+                )
+
+                content = normalize_home_peachbook_content(content)
+
+            result = save_section_draft(
+                conn,
+                section_key="home.peachbook",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+            draft_saved = True
+
+        except MarketingCMSConflict:
+            flash(
+                "A newer PeachBook Showcase draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_peachbook_editor")
+            )
+
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_peachbook_editor")
+            )
+
+    finally:
+        try:
+            if not draft_saved:
+                conn.rollback()
+        finally:
+            conn.close()
+
+    flash(
+        "PeachBook Showcase draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_peachbook_editor")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/peachbook",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachbook_editor():
+    """Display the private PeachBook showcase editor."""
+    from services.psp_marketing_cms_content import (
+        normalize_home_peachbook_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key="home.peachbook",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        showcase = normalize_home_peachbook_content(
+            state["draft_content"]
+        )["showcase"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        showcase = normalize_home_peachbook_content(
+            state["published_content"]
+        )["showcase"]
+        content_source = "published content"
+
+    else:
+        showcase = {
+            "image_public_id": "",
+            "image_url": "",
+            "image_alt": "",
+            "caption": "",
+        }
+        content_source = "existing website illustration"
+
+    return render_template(
+        "master_admin_website_peachbook.html",
+        showcase=showcase,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/home/peachweb",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachweb_editor():
+    """Display the private PeachWeb showcase editor."""
+    from services.psp_marketing_cms_content import (
+        normalize_home_peachweb_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key="home.peachweb",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        showcase = normalize_home_peachweb_content(
+            state["draft_content"]
+        )["showcase"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        showcase = normalize_home_peachweb_content(
+            state["published_content"]
+        )["showcase"]
+        content_source = "published content"
+
+    else:
+        showcase = {
+            "image_public_id": "",
+            "image_url": "",
+            "image_alt": "",
+            "caption": "",
+        }
+        content_source = "existing website illustration"
+
+    return render_template(
+        "master_admin_website_peachweb.html",
+        showcase=showcase,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/restore/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_restore_review(surface):
+    """Review an eligible historical introduction without writing."""
+    from flask import make_response
+    from services.psp_marketing_cms_intro_history import (
+        load_intro_history,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    raw_id = request.args.get("revision_id")
+
+    if raw_id is None:
+        abort(404)
+
+    raw_id = str(raw_id).strip()
+
+    if (
+        not raw_id
+        or len(raw_id) > 19
+        or not raw_id.isascii()
+        or not raw_id.isdecimal()
+    ):
+        abort(404)
+
+    revision_id = int(raw_id)
+
+    if not 0 < revision_id <= 9223372036854775807:
+        abort(404)
+
+    conn = get_db_connection()
+
+    try:
+        history = load_intro_history(
+            conn,
+            section_key=f"{surface}.intro",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    published_id = history["published_revision_id"]
+
+    if published_id is None or published_id == revision_id:
+        abort(404)
+
+    target = next(
+        (
+            item
+            for item in history["revisions"]
+            if item["revision_id"] == revision_id
+        ),
+        None,
+    )
+
+    current = next(
+        (
+            item
+            for item in history["revisions"]
+            if item["revision_id"] == published_id
+        ),
+        None,
+    )
+
+    if (
+        target is None
+        or current is None
+        or not target["was_published"]
+        or target["is_published"]
+        or not current["is_published"]
+    ):
+        abort(404)
+
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    response = make_response(
+        render_template(
+            "master_admin_website_intro_restore_review.html",
+            surface=surface,
+            page_label=page_label,
+            target=target,
+            current=current,
+            draft_revision_id=history["draft_revision_id"],
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/restore",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_restore_revision(surface):
+    """Restore a previously published introduction after confirmation."""
+    from services.psp_marketing_cms_intro_publication import (
+        restore_intro_revision,
+    )
+    from services.psp_marketing_cms_publication import (
+        MarketingCMSUnpublishedRevision,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if str(
+        request.form.get("restore_confirmation") or ""
+    ).strip() != "RESTORE":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid administrator")
+
+        actor_id = int(raw_actor)
+
+        if not 0 < actor_id <= 9223372036854775807:
+            raise ValueError("Invalid administrator")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    def required_revision(field):
+        raw = request.form.get(field)
+
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if (
+            not value
+            or len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if not 0 < number <= 9223372036854775807:
+            abort(400)
+
+        return number
+
+    target_revision_id = required_revision("revision_id")
+    expected_published_id = required_revision(
+        "expected_published_revision_id"
+    )
+
+    if target_revision_id == expected_published_id:
+        abort(400)
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = restore_intro_revision(
+                conn,
+                section_key=f"{surface}.intro",
+                actor_id=actor_id,
+                revision_id=target_revision_id,
+                expected_published_revision_id=(
+                    expected_published_id
+                ),
+            )
+        except MarketingCMSUnpublishedRevision:
+            flash(
+                "This introduction revision was never "
+                "published and cannot be restored.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_history",
+                    surface=surface,
+                )
+            )
+        except MarketingCMSConflict:
+            flash(
+                "The published introduction has changed. "
+                "Reload its history and review again.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_history",
+                    surface=surface,
+                )
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Introduction CMS revision "
+        f"{result['revision_id']} restored successfully. "
+        "Your saved draft was preserved. "
+        "Public-page CMS rendering is not yet connected.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "master_admin_website_intro_history",
+            surface=surface,
+        )
+    )
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/history",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_history(surface):
+    """Privately display one introduction's revision history."""
+    from flask import make_response
+    from services.psp_marketing_cms_intro_history import (
+        load_intro_history,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    section_key = f"{surface}.intro"
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    conn = get_db_connection()
+
+    try:
+        history = load_intro_history(
+            conn,
+            section_key=section_key,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(
+        render_template(
+            "master_admin_website_intro_history.html",
+            surface=surface,
+            page_label=page_label,
+            history=history,
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_publish_review(surface):
+    """Privately review one exact introduction draft."""
+    from flask import make_response
+    from services.psp_marketing_cms_page_intro import (
+        normalize_page_intro_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    section_key = f"{surface}.intro"
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_section_state(
+            conn,
+            section_key=section_key,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    draft_id = state["draft_revision_id"]
+    draft_content = state["draft_content"]
+    published_id = state["published_revision_id"]
+    published_content = state["published_content"]
+
+    if (draft_id is None) != (draft_content is None):
+        abort(500)
+
+    if (published_id is None) != (published_content is None):
+        abort(500)
+
+    if draft_id is None:
+        flash(
+            "Save an introduction draft before reviewing "
+            "it for publication.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "master_admin_website_intro_editor",
+                surface=surface,
+            )
+        )
+
+    draft_intro = normalize_page_intro_content(
+        section_key,
+        draft_content,
+    )["intro"]
+
+    published_intro = None
+
+    if published_content is not None:
+        published_intro = normalize_page_intro_content(
+            section_key,
+            published_content,
+        )["intro"]
+
+    response = make_response(
+        render_template(
+            "master_admin_website_intro_publish_review.html",
+            surface=surface,
+            page_label=page_label,
+            draft_revision_id=draft_id,
+            draft_intro=draft_intro,
+            published_revision_id=published_id,
+            published_intro=published_intro,
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/publish",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_publish_draft(surface):
+    """Publish an explicitly confirmed introduction revision."""
+    from services.psp_marketing_cms_intro_publication import (
+        publish_intro_draft,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if str(
+        request.form.get("publish_confirmation") or ""
+    ).strip() != "PUBLISH":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if not 0 < actor_id <= 9223372036854775807:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    def parse_revision(field, *, required):
+        raw = request.form.get(field)
+
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if not value:
+            if required:
+                abort(400)
+            return None
+
+        if (
+            len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if not 0 < number <= 9223372036854775807:
+            abort(400)
+
+        return number
+
+    draft_revision_id = parse_revision(
+        "expected_draft_revision_id",
+        required=True,
+    )
+
+    published_revision_id = parse_revision(
+        "expected_published_revision_id",
+        required=False,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = publish_intro_draft(
+                conn,
+                section_key=f"{surface}.intro",
+                actor_id=actor_id,
+                expected_draft_revision_id=draft_revision_id,
+                expected_published_revision_id=(
+                    published_revision_id
+                ),
+            )
+        except MarketingCMSConflict:
+            flash(
+                "The introduction draft or publication "
+                "has changed. Reload and review it before "
+                "publishing again.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_publish_review",
+                    surface=surface,
+                )
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Introduction CMS revision "
+        f"{result['revision_id']} published successfully. "
+        "Public-page CMS rendering is not yet connected.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "master_admin_website_intro_publish_review",
+            surface=surface,
+        )
+    )
+
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_editor(product_key):
+    """Private editor for one shared subscription product."""
+    from services.psp_marketing_cms_product_content import (
+        normalize_product_content,
+    )
+    from services.psp_marketing_cms_product_form import (
+        blank_product_content,
+        format_feature_headings,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSNotFound,
+        load_section_state,
+    )
+
+    products = {
+        "solo": ("🍑 Solo", "available"),
+        "peachpos": ("🍑 PeachPOS", "available"),
+        "team": ("👥 Team", "coming_soon"),
+        "collective": ("🍑 Peach Collective", "coming_soon"),
+    }
+    if product_key not in products:
+        abort(404)
+
+    section_key = f"product.{product_key}"
+    conn = get_db_connection()
+    try:
+        try:
+            state = load_section_state(
+                conn, section_key=section_key
+            )
+        except MarketingCMSNotFound:
+            flash(
+                "This product CMS section has not been "
+                "provisioned in the database.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    label, default_status = products[product_key]
+
+    if state["draft_content"] is not None:
+        content = normalize_product_content(
+            state["draft_content"]
+        )
+        source = "saved draft"
+        no_snapshot = False
+    elif state["published_content"] is not None:
+        content = normalize_product_content(
+            state["published_content"]
+        )
+        source = "published CMS content"
+        no_snapshot = False
+    else:
+        from services.psp_marketing_cms_product_baseline import (
+            get_product_baseline,
+        )
+        content = get_product_baseline(product_key)
+        source = "original website copy (unsaved baseline)"
+        no_snapshot = True
+
+    return render_template(
+        "master_admin_website_product.html",
+        product_key=product_key,
+        product_label=label,
+        content=content,
+        content_source=source,
+        no_snapshot=no_snapshot,
+        heading_lines=format_feature_headings(
+            content["packages"]["feature_headings"]
+        ),
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_save_draft(product_key):
+    """Save a validated private product draft, without publishing."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_product_form import (
+        parse_product_form,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSNotFound,
+        save_section_draft,
+    )
+
+    if product_key not in (
+        "solo", "peachpos", "team", "collective"
+    ):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor)
+        if not 0 < actor_id <= 9223372036854775807:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    raw_revision = request.form.get(
+        "expected_draft_revision_id"
+    )
+    if raw_revision is None:
+        abort(400)
+
+    raw_revision = str(raw_revision).strip()
+    if raw_revision:
+        if (
+            len(raw_revision) > 19
+            or not raw_revision.isascii()
+            or not raw_revision.isdecimal()
+        ):
+            abort(400)
+        expected_revision = int(raw_revision)
+        if not 0 < expected_revision <= 9223372036854775807:
+            abort(400)
+    else:
+        expected_revision = None
+
+    editor_url = url_for(
+        "master_admin_website_product_editor",
+        product_key=product_key,
+    )
+
+    try:
+        content = parse_product_form(request.form)
+    except MarketingContentError as exc:
+        flash(str(exc), "error")
+        return redirect(editor_url)
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = save_section_draft(
+                conn,
+                section_key=f"product.{product_key}",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer product draft exists. Reload "
+                "the editor before saving again.",
+                "error",
+            )
+            return redirect(editor_url)
+        except MarketingCMSNotFound:
+            flash(
+                "Product CMS section state is missing.",
+                "error",
+            )
+            return redirect(editor_url)
+    finally:
+        conn.close()
+
+    flash(
+        "Product draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+    return redirect(editor_url)
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_publish_review(product_key):
+    """Preview one private saved product draft before explicit publication."""
+    from flask import make_response
+    from services.psp_marketing_cms_product_content import (
+        normalize_product_content,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSNotFound,
+        load_section_state,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+
+    editor_url = url_for(
+        "master_admin_website_product_editor", product_key=product_key
+    )
+    conn = get_db_connection()
+    try:
+        try:
+            state = load_section_state(conn, section_key=f"product.{product_key}")
+        except MarketingCMSNotFound:
+            flash("The product CMS section has not been provisioned.", "error")
+            return redirect(editor_url)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    draft_id = state["draft_revision_id"]
+    draft_content = state["draft_content"]
+    published_id = state["published_revision_id"]
+    published_content = state["published_content"]
+    if ((draft_id is None) != (draft_content is None)) or (
+        (published_id is None) != (published_content is None)
+    ):
+        abort(500)
+
+    if draft_id is None:
+        flash("Save a private product draft before reviewing for publication.", "error")
+        return redirect(editor_url)
+
+    content = normalize_product_content(draft_content)
+    response = make_response(render_template(
+        "master_admin_website_product_publish_review.html",
+        product_key=product_key,
+        content=content,
+        draft_revision_id=draft_id,
+        published_revision_id=published_id,
+        security_csrf_token=_security_form_csrf_token(),
+    ))
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/publish",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_publish_draft(product_key):
+    """Publish exactly the approved product revision after confirmation."""
+    from services.psp_marketing_cms_content import MarketingContentError
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSNotFound,
+        MarketingCMSConfigurationError,
+    )
+    from services.psp_marketing_cms_product_publication import (
+        publish_product_draft,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+    if not _security_form_csrf_valid(request.form.get("security_csrf_token")):
+        abort(400)
+    if str(request.form.get("publish_confirmation") or "").strip() != "PUBLISH":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    if isinstance(raw_actor, bool):
+        abort(403)
+    try:
+        actor_id = int(raw_actor)
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+    if not (0 < actor_id <= 9223372036854775807):
+        abort(403)
+
+    def parse_revision(field, *, required):
+        raw = request.form.get(field)
+        if raw is None:
+            abort(400)
+        value = str(raw).strip()
+        if not value and not required:
+            return None
+        if (not value or len(value) > 19 or not value.isascii()
+                or not value.isdecimal()):
+            abort(400)
+        number = int(value)
+        if not (0 < number <= 9223372036854775807):
+            abort(400)
+        return number
+
+    draft_id = parse_revision("expected_draft_revision_id", required=True)
+    published_id = parse_revision("expected_published_revision_id", required=False)
+    editor_url = url_for(
+        "master_admin_website_product_editor", product_key=product_key
+    )
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = publish_product_draft(
+                conn,
+                product_key=product_key,
+                actor_id=actor_id,
+                expected_draft_revision_id=draft_id,
+                expected_published_revision_id=published_id,
+            )
+        except (MarketingCMSConflict, MarketingCMSNotFound,
+                MarketingCMSConfigurationError, MarketingContentError,
+                ValueError) as exc:
+            flash("Product publication was not completed: " + str(exc), "error")
+            return redirect(editor_url)
+    finally:
+        conn.close()
+
+    flash(
+        "Product revision " + str(result["revision_id"])
+        + " published successfully to the marketing CMS. ",
+        "success",
+    )
+    return redirect(editor_url)
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/history",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_history(product_key):
+    """Private, section-scoped publication history for one product."""
+    from flask import make_response
+    from services.psp_marketing_cms_service import (
+        MarketingCMSNotFound, load_section_state,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+
+    editor_url = url_for(
+        "master_admin_website_product_editor", product_key=product_key
+    )
+    page_key = f"product.{product_key}"
+    conn = get_db_connection()
+    try:
+        try:
+            state = load_section_state(conn, section_key=page_key)
+        except MarketingCMSNotFound:
+            flash("Product CMS section is not provisioned.", "error")
+            return redirect(editor_url)
+
+        current_id = state["published_revision_id"]
+        if (current_id is None) != (state["published_content"] is None):
+            abort(500)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT publication_event_id, revision_id,
+                       previous_revision_id, action, performed_by
+                FROM psp_marketing_publication_events
+                WHERE page_key = %s
+                  AND action IN ('publish', 'restore')
+                ORDER BY publication_event_id DESC
+                LIMIT 100
+                """,
+                (page_key,),
+            )
+            history_rows = cur.fetchall()
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    history = [
+        {
+            "event_id": row[0],
+            "revision_id": row[1],
+            "previous_revision_id": row[2],
+            "action": row[3],
+            "performed_by": row[4],
+        }
+        for row in history_rows
+    ]
+    response = make_response(render_template(
+        "master_admin_website_product_history.html",
+        product_key=product_key,
+        current_revision_id=current_id,
+        history=history,
+        security_csrf_token=_security_form_csrf_token(),
+    ))
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/restore",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_restore_revision(product_key):
+    """Restore a previously published product revision after confirmation."""
+    from services.psp_marketing_cms_content import MarketingContentError
+    from services.psp_marketing_cms_product_publication import (
+        MarketingCMSUnpublishedProductRevision,
+        restore_product_revision,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict, MarketingCMSConfigurationError,
+        MarketingCMSNotFound,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+    if not _security_form_csrf_valid(request.form.get("security_csrf_token")):
+        abort(400)
+    if str(request.form.get("restore_confirmation") or "").strip() != "RESTORE":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    if isinstance(raw_actor, bool):
+        abort(403)
+    try:
+        actor_id = int(raw_actor)
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+    if not (0 < actor_id <= 9223372036854775807):
+        abort(403)
+
+    def revision(field, required):
+        raw = request.form.get(field)
+        if raw is None:
+            abort(400)
+        value = str(raw).strip()
+        if not value and not required:
+            return None
+        if (not value or len(value) > 19 or not value.isascii()
+                or not value.isdecimal()):
+            abort(400)
+        number = int(value)
+        if not (0 < number <= 9223372036854775807):
+            abort(400)
+        return number
+
+    target_id = revision("revision_id", True)
+    expected_id = revision("expected_published_revision_id", False)
+    history_url = url_for(
+        "master_admin_website_product_history", product_key=product_key
+    )
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = restore_product_revision(
+                conn,
+                product_key=product_key,
+                actor_id=actor_id,
+                revision_id=target_id,
+                expected_published_revision_id=expected_id,
+            )
+        except (MarketingCMSConflict, MarketingCMSNotFound,
+                MarketingCMSConfigurationError,
+                MarketingCMSUnpublishedProductRevision,
+                MarketingContentError, ValueError) as exc:
+            flash("Product restoration was not completed: " + str(exc), "error")
+            return redirect(history_url)
+    finally:
+        conn.close()
+
+    flash(
+        "Previously published product revision " + str(result["revision_id"])
+        + " restored successfully.", "success",
+    )
+    return redirect(history_url)
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_editor(surface):
+    """Open the private Packages or Pricing introduction editor."""
+    from services.psp_marketing_cms_page_intro import (
+        normalize_page_intro_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    section_key = f"{surface}.intro"
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key=section_key,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        intro = normalize_page_intro_content(
+            section_key,
+            state["draft_content"],
+        )["intro"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        intro = normalize_page_intro_content(
+            section_key,
+            state["published_content"],
+        )["intro"]
+        content_source = "published content"
+
+    else:
+        intro = {
+            "heading": (
+                "Launch Special — Save 10% on "
+                "Monthly & Yearly Subscriptions!"
+            ),
+            "paragraph": (
+                "Peach Suite Pro Solo and PeachPOS are available "
+                "with a 10-day free trial. Use discount code "
+                "LAUNCH10 when subscribing to save 10% on "
+                "monthly or yearly subscriptions. Enter the "
+                "code in the discount field on the signup form."
+            ),
+        }
+        content_source = "existing website wording"
+
+    return render_template(
+        "master_admin_website_intro.html",
+        surface=surface,
+        page_label=page_label,
+        intro=intro,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_save_draft(surface):
+    """Save a private introduction draft without publishing."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        save_section_draft,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    content = {
+        "intro": {
+            "heading": request.form.get("heading", ""),
+            "paragraph": request.form.get("paragraph", ""),
+        }
+    }
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = save_section_draft(
+                conn,
+                section_key=f"{surface}.intro",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer introduction draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_editor",
+                    surface=surface,
+                )
+            )
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_editor",
+                    surface=surface,
+                )
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Introduction draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "master_admin_website_intro_editor",
+            surface=surface,
+        )
+    )
+
+
+@app.route(
+    "/master-admin/website",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_management():
+    """Display CMS Home Page content for Master Admin only."""
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        home_hero = state["draft_content"]["hero"]
+        content_source = "saved draft"
+    elif state["published_content"] is not None:
+        home_hero = state["published_content"]["hero"]
+        content_source = "published content"
+    else:
+        home_hero = {
+            "primary_button_text": "Start Your 10-Day Free Trial",
+            "secondary_button_text": "View Pricing",
+            "pricing_sentence": (
+                "Solo is $49/month or $490/year "
+                "after the 10-day free trial."
+            ),
+        }
+        content_source = "existing website wording"
+
+    return render_template(
+        "master_admin_website_management.html",
+        home_hero=home_hero,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/home/publish",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_publish_draft():
+    """Publish an explicitly confirmed Home Page revision."""
+    from services.psp_marketing_cms_publication import (
+        publish_home_draft,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        str(
+            request.form.get("publish_confirmation") or ""
+        ).strip()
+        != "PUBLISH"
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+
+    except (TypeError, ValueError):
+        abort(403)
+
+    def parse_revision(field, *, required):
+        raw = request.form.get(field)
+
+        # Both fields must be present. An empty published
+        # revision ID explicitly means nothing is published.
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if not value:
+            if required:
+                abort(400)
+            return None
+
+        if (
+            len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if (
+            number <= 0
+            or number > 9223372036854775807
+        ):
+            abort(400)
+
+        return number
+
+    draft_revision_id = parse_revision(
+        "expected_draft_revision_id",
+        required=True,
+    )
+
+    published_revision_id = parse_revision(
+        "expected_published_revision_id",
+        required=False,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = publish_home_draft(
+                conn,
+                actor_id=actor_id,
+                expected_draft_revision_id=(
+                    draft_revision_id
+                ),
+                expected_published_revision_id=(
+                    published_revision_id
+                ),
+            )
+
+        except MarketingCMSConflict:
+            flash(
+                "The Home Page draft or published "
+                "revision has changed. Reload Website "
+                "Management and review it before "
+                "publishing again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+
+    finally:
+        conn.close()
+
+    flash(
+        "Home Page revision "
+        f"{result['revision_id']} published successfully. "
+        "The public Home Page will use this revision.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_management")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/restore",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_restore_revision():
+    """Restore a previously published Home Page revision."""
+    from services.psp_marketing_cms_publication import (
+        MarketingCMSUnpublishedRevision,
+        restore_home_revision,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        str(
+            request.form.get("restore_confirmation") or ""
+        ).strip()
+        != "RESTORE"
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid administrator")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid administrator")
+
+    except (TypeError, ValueError):
+        abort(403)
+
+    def parse_required_revision(field):
+        raw = request.form.get(field)
+
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if (
+            not value
+            or len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if (
+            number <= 0
+            or number > 9223372036854775807
+        ):
+            abort(400)
+
+        return number
+
+    target_revision_id = parse_required_revision(
+        "revision_id"
+    )
+
+    expected_published_id = parse_required_revision(
+        "expected_published_revision_id"
+    )
+
+    if target_revision_id == expected_published_id:
+        abort(400)
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = restore_home_revision(
+                conn,
+                actor_id=actor_id,
+                revision_id=target_revision_id,
+                expected_published_revision_id=(
+                    expected_published_id
+                ),
+            )
+
+        except MarketingCMSUnpublishedRevision:
+            flash(
+                "This Home Page revision has never been "
+                "published and cannot be restored.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_home_history")
+            )
+
+        except MarketingCMSConflict:
+            flash(
+                "The currently published Home Page has "
+                "changed. Reload Revision History and "
+                "review it before restoring again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_home_history")
+            )
+
+    finally:
+        conn.close()
+
+    flash(
+        "Home Page revision "
+        f"{result['revision_id']} restored successfully. "
+        "The public Home Page will use this revision. "
+        "Your current draft has been preserved.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_home_history")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/restore/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_restore_review():
+    """Review a previously published revision without restoring."""
+    from flask import make_response
+    from services.psp_marketing_cms_history import (
+        load_home_history,
+    )
+
+    raw_revision_id = request.args.get("revision_id")
+
+    if raw_revision_id is None:
+        abort(404)
+
+    raw_revision_id = str(raw_revision_id).strip()
+
+    if (
+        not raw_revision_id
+        or len(raw_revision_id) > 19
+        or not raw_revision_id.isascii()
+        or not raw_revision_id.isdecimal()
+    ):
+        abort(404)
+
+    revision_id = int(raw_revision_id)
+
+    if not 0 < revision_id <= 9223372036854775807:
+        abort(404)
+
+    conn = get_db_connection()
+    try:
+        history = load_home_history(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    current_id = history["published_revision_id"]
+
+    if current_id is None or current_id == revision_id:
+        abort(404)
+
+    target = next(
+        (
+            revision for revision in history["revisions"]
+            if revision["revision_id"] == revision_id
+        ),
+        None,
+    )
+
+    current = next(
+        (
+            revision for revision in history["revisions"]
+            if revision["revision_id"] == current_id
+        ),
+        None,
+    )
+
+    if (
+        target is None
+        or current is None
+        or not target["was_published"]
+        or target["is_published"]
+        or not current["is_published"]
+    ):
+        abort(404)
+
+    response = make_response(
+        render_template(
+            "master_admin_website_restore_review.html",
+            target=target,
+            current=current,
+            draft_revision_id=history["draft_revision_id"],
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/history",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_home_history():
+    """Display read-only Home Page revision and publication history."""
+    from flask import make_response
+    from services.psp_marketing_cms_history import (
+        load_home_history,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        history = load_home_history(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(
+        render_template(
+            "master_admin_website_history.html",
+            history=history,
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_publish_review():
+    """Review saved Home Page content without publishing."""
+    from flask import make_response
+    from services.psp_marketing_cms_content import (
+        normalize_home_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if (
+        state["draft_revision_id"] is None
+        or state["draft_content"] is None
+    ):
+        flash(
+            "Save a Home Page draft before "
+            "reviewing it for publication.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_management")
+        )
+
+    draft_hero = normalize_home_content(
+        state["draft_content"]
+    )["hero"]
+
+    published_revision_id = state[
+        "published_revision_id"
+    ]
+    published_content = state["published_content"]
+
+    if (
+        (published_revision_id is None)
+        != (published_content is None)
+    ):
+        abort(500)
+
+    published_hero = None
+
+    if published_content is not None:
+        published_hero = normalize_home_content(
+            published_content
+        )["hero"]
+
+    response = make_response(
+        render_template(
+            "master_admin_website_publish_review.html",
+            draft_revision_id=state["draft_revision_id"],
+            draft_hero=draft_hero,
+            published_revision_id=published_revision_id,
+            published_hero=published_hero,
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/preview",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_home_preview():
+    """Preview a saved Home Page draft without publishing."""
+    from flask import make_response
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is None:
+        flash(
+            "Save a Home Page draft before previewing.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_management")
+        )
+
+    saved = state["draft_content"]
+    hero = (
+        saved.get("hero")
+        if isinstance(saved, dict)
+        else None
+    )
+
+    required = {
+        "primary_button_text": 80,
+        "secondary_button_text": 80,
+        "pricing_sentence": 300,
+    }
+
+    if (
+        not isinstance(hero, dict)
+        or set(hero) != set(required)
+        or any(
+            not isinstance(hero[key], str)
+            or not hero[key].strip()
+            or len(hero[key]) > maximum
+            or any(ord(char) < 32 for char in hero[key])
+            or "<" in hero[key]
+            or ">" in hero[key]
+            for key, maximum in required.items()
+        )
+    ):
+        abort(500)
+
+    response = make_response(
+        render_template(
+            "public_site/psp_home.html",
+            cms_preview=True,
+            cms_home_hero=hero,
+            contact_csrf_token=_public_security_csrf_token(
+                "public_contact"
+            ),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+def _master_admin_website_showcase_preview(showcase):
+    """Render one private showcase draft in the real homepage layout."""
+    from flask import make_response
+    from services.psp_marketing_cms_showcase_preview import (
+        build_showcase_preview_context,
+    )
+
+    if showcase not in ("peachweb", "peachbook"):
+        abort(404)
+
+    conn = get_db_connection()
+
+    try:
+        context = build_showcase_preview_context(
+            conn,
+            showcase=showcase,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if context is None:
+        flash(
+            f"Save a {showcase} showcase draft before previewing.",
+            "error",
+        )
+        editor = (
+            "master_admin_website_peachweb_editor"
+            if showcase == "peachweb"
+            else "master_admin_website_peachbook_editor"
+        )
+        return redirect(url_for(editor))
+
+    response = make_response(
+        render_template(
+            "public_site/psp_home.html",
+            **context,
+            contact_csrf_token=_public_security_csrf_token(
+                "public_contact"
+            ),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/peachweb/preview",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachweb_preview():
+    """Show only the private PeachWeb draft."""
+    return _master_admin_website_showcase_preview("peachweb")
+
+
+@app.route(
+    "/master-admin/website/home/peachbook/preview",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachbook_preview():
+    """Show only the private PeachBook draft."""
+    return _master_admin_website_showcase_preview("peachbook")
 
 
 @app.route("/master-admin")
@@ -68855,6 +72902,200 @@ def accept_business_invitation(token):
     )
 
 
+
+def _log_failed_business_login(
+    attempted_email,
+    failure_reason,
+    message,
+    severity="WARNING",
+    spa_id=None,
+    related_type=None,
+    related_id=None,
+):
+    """
+    Preserve the original security event and separately
+    record privacy-conscious login attempt details.
+
+    Failure to save optional details must never interfere
+    with the existing authentication result.
+    """
+    log_id = log_event(
+        "SECURITY",
+        message,
+        severity=severity,
+        spa_id=spa_id,
+        related_type=related_type,
+        related_id=related_id,
+    )
+
+    if log_id is None:
+        return None
+
+    conn = None
+    cur = None
+
+    try:
+        normalized_email = str(
+            attempted_email or ""
+        ).strip().lower()
+
+        masked_email = None
+
+        if "@" in normalized_email:
+            local, domain = normalized_email.split("@", 1)
+            if local and domain:
+                masked_email = (
+                    local[:1] + "***@" + domain
+                )[:260]
+
+        secret = app.secret_key
+
+        if isinstance(secret, str):
+            secret = secret.encode("utf-8")
+
+        if not secret:
+            raise RuntimeError(
+                "Security fingerprint secret unavailable."
+            )
+
+        email_fingerprint = None
+
+        if normalized_email:
+            email_fingerprint = hmac.new(
+                secret,
+                (
+                    "business-login-email:"
+                    + normalized_email
+                ).encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+
+        # Reuse the existing privacy-safe source helper.
+        # Apply a second domain-specific HMAC so login
+        # fingerprints remain distinct from reset events.
+        source_reference = _password_reset_source_hash()
+
+        source_fingerprint = hmac.new(
+            secret,
+            (
+                "business-login-source:"
+                + source_reference
+            ).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+        # Classify the untrusted User-Agent into broad
+        # families. Never persist its raw contents.
+        agent = str(
+            request.headers.get("User-Agent") or ""
+        )[:512].lower()
+
+        if "edg/" in agent:
+            browser = "Edge"
+        elif "firefox/" in agent:
+            browser = "Firefox"
+        elif "chrome/" in agent or "crios/" in agent:
+            browser = "Chrome"
+        elif "safari/" in agent:
+            browser = "Safari"
+        else:
+            browser = "Unknown"
+
+        if "iphone" in agent:
+            platform = "iPhone"
+        elif "ipad" in agent:
+            platform = "iPad"
+        elif "android" in agent:
+            platform = "Android"
+        elif "windows" in agent:
+            platform = "Windows"
+        elif "macintosh" in agent or "mac os" in agent:
+            platform = "macOS"
+        elif "linux" in agent:
+            platform = "Linux"
+        else:
+            platform = "Unknown"
+
+
+        encrypted_email = None
+
+        if (
+            normalized_email
+            and os.environ.get(
+                "SECURITY_LOGIN_EMAIL_ENCRYPTION_KEY"
+            )
+        ):
+            try:
+                from services.security_login_email_crypto import (
+                    encrypt_attempted_email,
+                )
+
+                encrypted_email = encrypt_attempted_email(
+                    normalized_email,
+                    system_log_id=int(log_id),
+                )
+
+            except Exception as exc:
+                # Do not print email addresses, keys, or ciphertext.
+                print(
+                    "[LOGIN SECURITY EMAIL ENCRYPTION ERROR] "
+                    + type(exc).__name__,
+                    flush=True,
+                )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO security_login_attempt_details (
+                system_log_id,
+                failure_reason,
+                login_channel,
+                attempted_email_masked,
+                attempted_email_ciphertext,
+                attempted_email_fingerprint,
+                source_fingerprint,
+                browser_family,
+                platform_family
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (system_log_id) DO NOTHING
+            """,
+            (
+                log_id,
+                failure_reason,
+                "web",
+                masked_email,
+                encrypted_email,
+                email_fingerprint,
+                source_fingerprint,
+                browser,
+                platform,
+            ),
+        )
+
+        conn.commit()
+
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+
+        print(
+            "[LOGIN SECURITY CONTEXT ERROR] "
+            + type(exc).__name__,
+            flush=True,
+        )
+
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+    return log_id
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -68888,7 +73129,9 @@ def login():
             cur.close()
             conn.close()
 
-            log_security(
+            _log_failed_business_login(
+                email,
+                "no_active_account",
                 "Login failed: user account not found.",
                 severity="WARNING",
                 related_type="business_login"
@@ -68928,7 +73171,9 @@ def login():
             cur.close()
             conn.close()
 
-            log_security(
+            _log_failed_business_login(
+                email,
+                "account_locked",
                 "Login blocked: account temporarily locked.",
                 severity="ALERT",
                 spa_id=user[1],
@@ -68966,7 +73211,9 @@ def login():
             conn.close()
 
             if newly_locked:
-                log_security(
+                _log_failed_business_login(
+                    email,
+                    "lockout_triggered",
                     "Login temporarily locked after "
                     "repeated invalid passwords.",
                     severity="ALERT",
@@ -68985,7 +73232,9 @@ def login():
                     "error",
                 )
             else:
-                log_security(
+                _log_failed_business_login(
+                    email,
+                    "invalid_password",
                     "Login failed: invalid password.",
                     severity="WARNING",
                     spa_id=user[1],
@@ -74441,6 +78690,7 @@ def clients_home():
 @app.route("/godaddy-imports/review-calendar")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def review_godaddy_imports_and_calendar():
     spa_id = current_spa_id()
 
@@ -81759,6 +86009,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
 @app.route("/godaddy-imports/<int:appointment_id>/raw")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_manage_booking_imports")
 def godaddy_import_raw(appointment_id):
     spa_id = current_spa_id()
@@ -81989,6 +86240,7 @@ def debug_db():
 @app.route("/test-godaddy-create-appointment")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def test_godaddy_create_appointment():
     spa_id = current_spa_id()
 
@@ -82016,6 +86268,7 @@ def test_godaddy_create_appointment():
 @app.route("/godaddy-imports/reviewed/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_manage_booking_imports")
 def mark_godaddy_import_reviewed(appointment_id):
     spa_id = current_spa_id()
@@ -83286,6 +87539,48 @@ def sms_home():
     template_type = request.args.get("template_type")
 
 
+    # Do not expose the active composer until business SMS
+    # compliance and sender assignment are approved.
+    sms_permissions = get_sms_business_permissions(spa_id)
+
+    if not sms_permissions.get("service_sms_enabled", False):
+        workspace_access = current_workspace_access() or {}
+        return render_template(
+            "sms_restricted.html",
+            reason=(
+                sms_permissions.get("reason")
+                or "SMS sending is unavailable for this business."
+            ),
+            can_manage_compliance=bool(
+                workspace_access.get(
+                    "can_manage_messaging_compliance", False
+                )
+            ),
+        ), 403
+
+    # An approved status is not enough: the active workspace
+    # must also have an actual assigned sending number.
+    try:
+        resolve_sms_phone_number(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            provider="telnyx"
+        )
+    except (PermissionError, ValueError):
+        workspace_access = current_workspace_access() or {}
+        return render_template(
+            "sms_restricted.html",
+            reason=(
+                "An active SMS sending number is not assigned "
+                "to this workspace."
+            ),
+            can_manage_compliance=bool(
+                workspace_access.get(
+                    "can_manage_messaging_compliance", False
+                )
+            ),
+        ), 403
+
     if not sms_email_terms_accepted(spa_id):
         flash(
             "You must accept the SMS and Email Terms and Conditions before using messaging features",
@@ -83629,6 +87924,24 @@ def sms_group_preview():
     show_all = request.form.get("show_all", "").strip()
     client_status = request.form.get("client_status", "").strip()
 
+    # Block unapproved businesses before processing SMS recipients
+    # or generating an active group messaging preview.
+    sms_permissions = get_sms_business_permissions(spa_id)
+
+    if not sms_permissions.get("service_sms_enabled", False):
+        abort(403)
+
+    # Deny previews when no active sender resolves for this
+    # business and workspace.
+    try:
+        resolve_sms_phone_number(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            provider="telnyx"
+        )
+    except (PermissionError, ValueError):
+        abort(403)
+
     if not sms_email_terms_accepted(spa_id):
         flash(
             "You must accept the SMS and Email Terms and Conditions before using messaging features.",
@@ -83755,6 +88068,23 @@ def sms_group_send():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     language_code = get_request_language()
+
+    # Fail closed before processing SMS recipients.
+    # The central sender independently checks compliance.
+    sms_permissions = get_sms_business_permissions(spa_id)
+    if not sms_permissions.get("service_sms_enabled", False):
+        abort(403)
+
+    # Require an active sender assigned to this business
+    # and workspace before processing group recipients.
+    try:
+        resolve_sms_phone_number(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            provider="telnyx"
+        )
+    except (PermissionError, ValueError):
+        abort(403)
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -86434,6 +90764,7 @@ def reminder_queue():
 @app.route("/reminder_queue/generate-appointments", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_manage_communication_automation")
 
 def generate_appointment_reminders():
@@ -87019,6 +91350,7 @@ def send_one_reminder(reminder_id):
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_send_sms")
 
 def prepare_appointment_reminder(appointment_id):
@@ -87161,6 +91493,7 @@ def prepare_appointment_reminder(appointment_id):
 @app.route("/reminder_queue/generate-after-appointments", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission("can_manage_communication_automation")
 
 def generate_after_appointment_followups():
@@ -89154,6 +93487,78 @@ def inventory_home():
 #   --------------------------------------
 
 
+@app.route(
+    "/inventory/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission("can_view_inventory")
+def complete_pos_inventory_onboarding():
+    if current_subscription_tier_code() != "pos":
+        abort(403)
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(token):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            abort(403)
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="pos_inventory",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Products and Inventory setup reviewed. "
+        "You can add more products anytime.",
+        "success",
+    )
+
+    return redirect(
+        url_for("public_website_settings", onboarding=1)
+    )
+
+
 @app.route("/inventory/add", methods=["GET", "POST"])
 @login_required
 @spa_required
@@ -89162,11 +93567,26 @@ def add_inventory_product():
     business_unit_id = current_business_unit_id()
     prefill_sku = request.args.get("sku", "").strip()
 
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        and current_subscription_tier_code() == "pos"
+    )
+
     if not business_unit_id:
         abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+    if onboarding_requested and request.method == "GET":
+        onboarding_requested = bool(
+            _business_onboarding_setup_progress(
+                cur,
+                spa_id=spa_id,
+                user_id=session.get("user_id"),
+                business_unit_id=business_unit_id,
+            )
+        )
 
     if request.method == "POST":
 
@@ -89296,14 +93716,24 @@ def add_inventory_product():
                 "success",
             )
 
-            return redirect(url_for("inventory_home"))
+            return redirect(
+                    url_for("add_inventory_product", onboarding=1)
+                    if onboarding_requested
+                    else url_for("inventory_home")
+                )
 
     cur.close()
     conn.close()
 
     return render_template(
         "add_inventory_product.html",
-        prefill_sku=prefill_sku
+        prefill_sku=prefill_sku,
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        ),
     )
 
 
@@ -92507,6 +96937,7 @@ def client_information_labels():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def schedule_appointment_start():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -108798,6 +113229,7 @@ def _complete_service_recipient_resolution_after_client_create(
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def resolve_service_recipient(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = (
@@ -114793,6 +119225,7 @@ def calendar_view():
 @app.route("/quick_reschedule_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def quick_reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -115043,6 +119476,7 @@ def quick_reschedule_appointment(appointment_id):
 @app.route("/appointment-details/<int:appointment_id>")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def appointment_details(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -115243,6 +119677,7 @@ def appointment_details(appointment_id):
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def save_appointment_todays_contact(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -116751,6 +121186,9 @@ def dashboard():
     if session.get("role") == "master_admin":
        return redirect(url_for("feedback_admin"))
 
+    if current_subscription_tier_code() == "pos":
+        return redirect(url_for("morning_briefing"))
+
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     conn = get_db_connection()
@@ -117319,6 +121757,24 @@ def morning_briefing_content():
         )
     )
 
+    from services.stripe_billing_snapshot import (
+        load_billing_snapshot,
+    )
+
+    business_timezone = get_current_spa_timezone(spa_id)
+    billing_snapshot = None
+
+    if (
+        current_business_unit_membership_role_code()
+        == "organization_admin"
+    ):
+        billing_snapshot = load_billing_snapshot(
+            cur,
+            spa_id=spa_id,
+            environment=get_stripe_environment(),
+            timezone_name=business_timezone,
+        )
+
     if not appointments_enabled and square_enabled:
         peachpos_summary = _get_peachpos_sales_summary(
             cur,
@@ -117821,6 +122277,20 @@ def morning_briefing_content():
     cur.close()
     conn.close()
 
+    from services.stripe_billing_quote import (
+        utc_to_business_time,
+    )
+
+    trial_end_local = utc_to_business_time(
+        subscription_summary.get("trial_end"),
+        business_timezone,
+    )
+
+    billing_details = (
+        billing_snapshot.get("billing_details")
+        if billing_snapshot else None
+    )
+
     show_login_splash = False
     return render_template(
         "morning_briefing.html",
@@ -117836,6 +122306,9 @@ def morning_briefing_content():
         spa_now=spa_now,
         action_cards=action_cards,
         setup_progress=setup_progress,
+        billing_details=billing_details,
+        billing_snapshot=billing_snapshot,
+        trial_end_local=trial_end_local,
         subscription_summary=subscription_summary,
         show_coach_welcome=show_coach_welcome,
         show_setup_complete_welcome=(
@@ -120845,6 +125318,7 @@ from datetime import date
 @app.route("/appointments")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def appointments():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -121011,6 +125485,7 @@ def appointments():
 @app.route("/add_appointment", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def add_appointment():
     user_id = session.get("user_id")
     spa_id = current_spa_id()
@@ -121442,6 +125917,7 @@ def add_appointment():
 @app.route("/edit_appointment/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def edit_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -121687,6 +126163,7 @@ def edit_appointment(appointment_id):
 @app.route("/delete_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def delete_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -121794,6 +126271,7 @@ def delete_appointment(appointment_id):
 @app.route("/cancel_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def cancel_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -121940,6 +126418,7 @@ def cancel_appointment(appointment_id):
 @app.route("/reschedule_appointment/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -122212,6 +126691,7 @@ def reschedule_appointment(appointment_id):
 @app.route("/complete_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def complete_appointment(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -122347,6 +126827,7 @@ def complete_appointment(appointment_id):
 @app.route("/post_appointment_wrap_up/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def post_appointment_wrap_up(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -122773,6 +127254,7 @@ def post_appointment_wrap_up(appointment_id):
 @app.route("/post_appointment_wrap_up_saved/<int:appointment_id>")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def post_appointment_wrap_up_saved(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -122842,6 +127324,7 @@ def post_appointment_wrap_up_saved(appointment_id):
 @app.route("/appointment_history/<int:appointment_id>")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 def appointment_history(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -124916,6 +129399,7 @@ def delete_client(client_id):
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -125286,6 +129770,7 @@ def booking_business_hours():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -125402,6 +129887,7 @@ def complete_business_hours_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -126036,6 +130522,7 @@ def booking_provider_hours():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -126156,6 +130643,7 @@ def complete_provider_hours_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -126931,6 +131419,7 @@ def booking_provider_services():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -127055,6 +131544,7 @@ def complete_provider_services_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -128100,6 +132590,7 @@ def booking_provider_time_off():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -128185,6 +132676,7 @@ def complete_provider_time_off_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -128616,6 +133108,1881 @@ def login_security_settings():
     )
 
 
+
+# ==========================================================
+# PEACHPOS EVENT CALENDAR — BUSINESS CALENDAR PREFERENCE
+# ==========================================================
+
+# Enable only after Team dual-calendar workflows are released.
+TEAM_DUAL_CALENDAR_ENABLED = False
+
+
+def _available_preferred_calendar_types():
+    tier = current_subscription_tier_code()
+
+    if tier == "solo":
+        if has_subscription_feature("appointments"):
+            return ("appointment",)
+        return ()
+
+    if tier == "pos":
+        if has_subscription_feature("event_calendar"):
+            return ("event",)
+        return ()
+
+    if tier == "team":
+        allowed = []
+
+        if has_subscription_feature("appointments"):
+            allowed.append("appointment")
+
+        if (
+            TEAM_DUAL_CALENDAR_ENABLED
+            and has_subscription_feature("event_calendar")
+        ):
+            allowed.append("event")
+
+        return tuple(allowed)
+
+    return ()
+
+
+def _effective_preferred_calendar_type(stored_value, allowed):
+    if stored_value in allowed:
+        return stored_value
+
+    if "appointment" in allowed:
+        return "appointment"
+
+    if "event" in allowed:
+        return "event"
+
+    return None
+
+
+@app.route("/save_calendar_settings", methods=["POST"])
+@login_required
+@spa_required
+def save_calendar_settings():
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    calendar_type = request.form.get(
+        "calendar_type", ""
+    ).strip().lower()
+
+    allowed = _available_preferred_calendar_types()
+
+    if calendar_type not in {"appointment", "event"}:
+        abort(400)
+
+    if calendar_type not in allowed:
+        abort(403)
+
+    spa_id = current_spa_id()
+
+    if spa_id is None:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE spas
+            SET preferred_calendar_type = %s
+            WHERE spa_id = %s
+            """,
+            (calendar_type, spa_id),
+        )
+
+        if cur.rowcount != 1:
+            conn.rollback()
+            abort(404)
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash("Calendar settings saved successfully.", "success")
+    return redirect(url_for("admin"))
+
+
+
+# ============================================================
+# PEACHPOS EVENT UNIT MANAGEMENT
+# ============================================================
+
+EVENT_UNIT_TYPES = {
+    "truck": "Truck",
+    "trailer": "Trailer",
+    "cart": "Cart",
+    "booth": "Booth",
+    "custom": "Custom",
+}
+
+
+def _event_unit_scope():
+    spa_id = current_spa_id()
+    workspace_id = current_business_unit_id()
+    actor_id = session.get("user_id")
+
+    if None in (spa_id, workspace_id, actor_id):
+        abort(403)
+
+    return spa_id, workspace_id, actor_id
+
+
+def _event_unit_form_values(form):
+    import re
+
+    values = {
+        "unit_name": (form.get("unit_name") or "").strip(),
+        "unit_type": (form.get("unit_type") or "").strip(),
+        "unit_identifier": (
+            form.get("unit_identifier") or ""
+        ).strip(),
+        "description": (form.get("description") or "").strip(),
+        "calendar_color": (
+            form.get("calendar_color") or ""
+        ).strip(),
+        "notes": (form.get("notes") or "").strip(),
+    }
+
+    if not 1 <= len(values["unit_name"]) <= 150:
+        raise ValueError("Unit name must be 1–150 characters.")
+
+    if values["unit_type"] not in EVENT_UNIT_TYPES:
+        raise ValueError("Select a valid Event Unit type.")
+
+    if len(values["unit_identifier"]) > 80:
+        raise ValueError("Unit identifier is too long.")
+
+    if len(values["description"]) > 2000:
+        raise ValueError("Description is too long.")
+
+    if len(values["notes"]) > 5000:
+        raise ValueError("Notes are too long.")
+
+    if not re.fullmatch(
+        r"#[0-9A-Fa-f]{6}",
+        values["calendar_color"]
+    ):
+        raise ValueError("Select a valid calendar color.")
+
+    return values
+
+
+
+# ==========================================================
+# EVENT CALENDAR — ADD EVENT DEVELOPMENT PREVIEW
+# ==========================================================
+
+
+# ==========================================================
+# EVENT CALENDAR — VALIDATE DRAFT (NO DATABASE WRITES)
+# ==========================================================
+
+
+# ==========================================================
+# PeachPOS Event Calendar — read-only Month view
+# ==========================================================
+
+@app.route("/events/view", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_view_events():
+    """Read-only View Events list for the authenticated PeachPOS workspace.
+
+    Next Date reference and archive labels are display-only in EC-065-2C.
+    This endpoint never writes schedule, metadata, or reminder records.
+    """
+    from datetime import date
+    from flask import make_response
+    from services.event_calendar_view_events import (
+        ViewEventsError,
+        list_view_events,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+
+    start_raw = (request.args.get("start_date") or "").strip()
+    end_raw = (request.args.get("end_date") or "").strip()
+    status = (request.args.get("status") or "").strip().lower()
+    search = (request.args.get("search") or "").strip()
+    archive_mode = (request.args.get("archive") or "active").strip().lower()
+    page_raw = (request.args.get("page") or "1").strip()
+
+    def parse_date(raw):
+        if not raw:
+            return None
+        if (
+            len(raw) != 10
+            or raw[4] != "-"
+            or raw[7] != "-"
+            or not all(ch.isascii() and ch.isdecimal() for ch in raw if ch != "-")
+        ):
+            abort(400)
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            abort(400)
+
+    start_date = parse_date(start_raw)
+    end_date = parse_date(end_raw)
+
+    if (
+        not page_raw.isascii()
+        or not page_raw.isdecimal()
+        or len(page_raw) > 4
+    ):
+        abort(400)
+    page = int(page_raw)
+    if not 1 <= page <= 2001:
+        abort(400)
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+        try:
+            result = list_view_events(
+                conn,
+                spa_id,
+                workspace_id,
+                start_date=start_date,
+                end_date=end_date,
+                status=status,
+                search=search,
+                archive_mode=archive_mode,
+                limit=50,
+                offset=(page - 1) * 50,
+            )
+        except ViewEventsError:
+            abort(400)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(render_template(
+        "event_view_events.html",
+        events=result["events"],
+        has_more=result["has_more"],
+        page=page,
+        start_date=start_raw,
+        end_date=end_raw,
+        status=status,
+        search=search,
+        archive_mode=archive_mode,
+        event_csrf_token=_security_form_csrf_token(),
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+def _ec_set_view_events_archive_state(event_id, *, archive):
+    """Archive/restore metadata, allocations and public flag atomically."""
+    from services.event_calendar_view_events import (
+        ViewEventsError, ViewEventsArchiveConflict,
+    )
+    from services.event_calendar_archive_actions import apply_event_archive_state
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+    if event_id <= 0:
+        abort(404)
+    if request.content_length is not None and request.content_length > 4096:
+        abort(413)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if archive and request.form.get("archive_acknowledged") != "1":
+        abort(400)
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+    conn = get_db_connection()
+    try:
+        try:
+            with conn.cursor() as cur:
+                apply_event_archive_state(
+                    cur, spa_id=spa_id, workspace_id=workspace_id,
+                    event_id=event_id, actor_id=actor_id, archive=archive,
+                )
+            conn.commit()
+        except ViewEventsArchiveConflict:
+            conn.rollback()
+            abort(409)
+        except ViewEventsError:
+            conn.rollback()
+            abort(400)
+        except Exception:
+            conn.rollback()
+            raise
+    finally:
+        conn.close()
+
+    if archive:
+        flash("Event archived. Event-specific equipment/employee assignments removed; "
+              "PeachWeb unchecked. The event record is preserved.", "success")
+    else:
+        flash("Event restored. Reassign equipment and employees and explicitly "
+              "enable PeachWeb if desired.", "success")
+    return redirect(url_for("peachpos_view_events"))
+
+
+@app.route("/events/<int:event_id>/archive", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_archive(event_id):
+    return _ec_set_view_events_archive_state(event_id, archive=True)
+
+
+@app.route("/events/<int:event_id>/restore", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_restore(event_id):
+    return _ec_set_view_events_archive_state(event_id, archive=False)
+
+
+@app.route("/events/calendar", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_calendar_month():
+    from calendar import Calendar
+    from datetime import date
+    from flask import request, render_template
+    from services.event_calendar_read import (
+        list_event_calendar_rows,
+    )
+    from services.event_calendar_month import build_month_view
+    from services.event_calendar_archive_read import (
+        list_archived_event_spans, overlay_archived_month,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    show_archived_raw = request.args.get("show_archived", "0")
+    if show_archived_raw not in ("0", "1"):
+        abort(400)
+    show_archived = show_archived_raw == "1"
+
+    today = date.today()
+
+    try:
+        year = int(request.args["year"]) if "year" in request.args else today.year
+        month = int(request.args["month"]) if "month" in request.args else today.month
+    except (ValueError, TypeError):
+        abort(400)
+
+    if not 2000 <= year <= 2100 or not 1 <= month <= 12:
+        abort(400)
+
+    weeks = Calendar(firstweekday=6).monthdatescalendar(year, month)
+    window_start = weeks[0][0]
+    window_end = weeks[-1][-1]
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+
+        rows = list_event_calendar_rows(
+            conn,
+            spa_id,
+            workspace_id,
+            window_start,
+            window_end,
+        )
+
+        calendar_data = build_month_view(
+            rows, year, month, today
+        )
+        if show_archived:
+            archived_spans = list_archived_event_spans(
+                conn, spa_id, workspace_id, window_start, window_end,
+            )
+            overlay_archived_month(calendar_data, archived_spans)
+
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    return render_template(
+        "event_calendar_month.html",
+        calendar=calendar_data,
+        show_archived=show_archived,
+        event_csrf_token=_security_form_csrf_token(),
+    )
+
+
+
+# ==========================================================
+# PeachPOS Event Calendar — protected read-only details
+# ==========================================================
+
+@app.route("/events/calendar/week", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_calendar_week():
+    """Read-only seven-day Event Calendar for the authenticated workspace."""
+    import re
+    from datetime import date
+    from flask import abort, make_response, render_template, request
+    from services.event_calendar_read import list_event_calendar_rows
+    from services.event_calendar_week import build_week_view, week_bounds
+    from services.event_calendar_archive_read import (
+        list_archived_event_spans, overlay_archived_week,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    show_archived_raw = request.args.get("show_archived", "0")
+    if show_archived_raw not in ("0", "1"):
+        abort(400)
+    show_archived = show_archived_raw == "1"
+
+    today = date.today()
+    args = request.args
+    if "date" in args:
+        if "year" in args or "month" in args:
+            abort(400)
+        value = args["date"]
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+            abort(400)
+        try:
+            anchor = date.fromisoformat(value)
+        except ValueError:
+            abort(400)
+    elif "year" in args or "month" in args:
+        if "year" not in args or "month" not in args:
+            abort(400)
+        try:
+            year = int(args["year"])
+            month = int(args["month"])
+        except (ValueError, TypeError):
+            abort(400)
+        if not 2000 <= year <= 2100 or not 1 <= month <= 12:
+            abort(400)
+        day = today.day if year == today.year and month == today.month else 1
+        anchor = date(year, month, day)
+    else:
+        anchor = today
+
+    if not 2000 <= anchor.year <= 2100:
+        abort(400)
+
+    week_start, week_end = week_bounds(anchor)
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+        rows = list_event_calendar_rows(
+            conn, spa_id, workspace_id, week_start, week_end
+        )
+        calendar_data = build_week_view(rows, anchor, today)
+        if show_archived:
+            archived_spans = list_archived_event_spans(
+                conn, spa_id, workspace_id, week_start, week_end,
+            )
+            overlay_archived_week(calendar_data, archived_spans)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(render_template(
+        "event_calendar_week.html",
+        calendar=calendar_data,
+        show_archived=show_archived,
+        event_csrf_token=_security_form_csrf_token(),
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.route("/events/calendar/year", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_calendar_year():
+    """Read-only annual summary for the authenticated PeachPOS workspace."""
+    from datetime import date
+    from flask import make_response, render_template, request
+    from services.event_calendar_year_read import list_year_day_summaries
+    from services.event_calendar_year import build_year_view
+    from services.event_calendar_archive_read import (
+        list_archived_event_spans, overlay_archived_year,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    show_archived_raw = request.args.get("show_archived", "0")
+    if show_archived_raw not in ("0", "1"):
+        abort(400)
+    show_archived = show_archived_raw == "1"
+
+    today = date.today()
+    try:
+        year = int(request.args["year"]) if "year" in request.args else today.year
+    except (ValueError, TypeError):
+        abort(400)
+    if not 2000 <= year <= 2100:
+        abort(400)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+        summaries = list_year_day_summaries(
+            conn, spa_id, workspace_id, year
+        )
+        calendar_data = build_year_view(summaries, year, today)
+        if show_archived:
+            archived_spans = list_archived_event_spans(
+                conn, spa_id, workspace_id, date(year, 1, 1), date(year, 12, 31),
+            )
+            overlay_archived_year(calendar_data, archived_spans)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(render_template(
+        "event_calendar_year.html",
+        calendar=calendar_data,
+        show_archived=show_archived,
+        current_month=today.month if year == today.year else 1,
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.route("/events/<int:event_id>/details", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_calendar_details(event_id):
+    from flask import jsonify
+    from services.event_calendar_details import get_event_details
+    from services.event_calendar_edit_history_view import load_event_history_text
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    if event_id <= 0:
+        abort(404)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+
+        details = get_event_details(
+            conn,
+            event_id=event_id,
+            spa_id=spa_id,
+            workspace_id=workspace_id,
+        )
+
+        # Audit lookup shares this READ ONLY transaction.
+        if details is not None:
+            with conn.cursor() as history_cur:
+                details["history_text"] = load_event_history_text(
+                    history_cur,
+                    spa_id=spa_id,
+                    workspace_id=workspace_id,
+                    event_id=event_id,
+                )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if details is None:
+        abort(404)
+
+    response = jsonify({"ok": True, "event": details})
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.route("/events/validate", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def validate_event_draft():
+    import json
+    from flask import jsonify
+    from services.event_calendar_validation import (
+        EventValidationError,
+        validate_event_payload,
+    )
+    from services.event_calendar_coverage import (
+        analyze_event_coverage,
+    )
+    from services.event_calendar_resources import (
+        EventResourceError,
+        validate_event_resource_ownership,
+    )
+    from services.event_calendar_availability import (
+        EventAvailabilityError,
+        validate_existing_event_availability,
+    )
+
+    # Event scheduling remains Business Administrator only.
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        request.content_length is None
+        or request.content_length > 600000
+    ):
+        abort(413)
+
+    raw_payload = request.form.get("event_payload", "")
+
+    if not raw_payload or len(raw_payload) > 500000:
+        return jsonify({
+            "ok": False,
+            "ready_to_save": False,
+            "error": "Missing or oversized event data.",
+        }), 400
+
+    try:
+        payload = json.loads(raw_payload)
+    except (ValueError, TypeError, RecursionError):
+        return jsonify({
+            "ok": False,
+            "ready_to_save": False,
+            "error": "Invalid event data format.",
+        }), 400
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+
+            cur.execute(
+                """
+                SELECT timezone_name
+                FROM spas
+                WHERE spa_id = %s
+                """,
+                (spa_id,),
+            )
+
+            row = cur.fetchone()
+            timezone_name = row[0] if row else None
+
+    finally:
+        conn.rollback()
+        conn.close()
+
+    if not timezone_name:
+        return jsonify({
+            "ok": False,
+            "ready_to_save": False,
+            "error": "Business time zone is not configured.",
+        }), 422
+
+    try:
+        normalized = validate_event_payload(
+            payload, timezone_name
+        )
+    except EventValidationError as exc:
+        return jsonify({
+            "ok": False,
+            "ready_to_save": False,
+            "error": str(exc),
+        }), 422
+
+    # Read-only database preflight.
+    # Revalidate inside the future save transaction.
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+
+            try:
+                ownership = validate_event_resource_ownership(
+                    cur,
+                    normalized,
+                    spa_id,
+                    workspace_id,
+                )
+            except EventResourceError as exc:
+                return jsonify({
+                    "ok": False,
+                    "ready_to_save": False,
+                    "error": str(exc),
+                }), 422
+
+            try:
+                availability = validate_existing_event_availability(
+                    cur,
+                    normalized,
+                    spa_id,
+                )
+            except EventAvailabilityError as exc:
+                return jsonify({
+                    "ok": False,
+                    "ready_to_save": False,
+                    "error": str(exc),
+                }), 409
+
+    finally:
+        conn.rollback()
+        conn.close()
+
+    days = normalized["days"]
+    active_days = [
+        day for day in days if day["operating"]
+    ]
+
+    staffing_coverage = analyze_event_coverage(normalized)
+
+    return jsonify({
+        "ok": True,
+        "ready_to_save": False,
+        "validation_level": "database_preflight",
+        "message": (
+            "Event structure, resource eligibility, and "
+            "existing reservations passed database preflight. "
+            "Nothing was saved. Availability must be "
+            "rechecked during the final save transaction."
+        ),
+        "ownership_validated": ownership["ownership_validated"],
+        "availability_validated": availability["availability_validated"],
+        "calendar_days": len(days),
+        "operating_days": len(active_days),
+        "equipment_assignments": sum(
+            len(day["equipment_ids"])
+            for day in active_days
+        ),
+        "employee_shifts": sum(
+            len(day["shifts"])
+            for day in active_days
+        ),
+        "staffing_coverage": staffing_coverage,
+        "staffing_warning_count": (
+            staffing_coverage["uncovered_unit_days"]
+        ),
+        "staffing_time_zone": normalized["timezone_name"],
+        "staffing_coverage_advisory": True,
+    }), 200
+
+
+# ==========================================================
+# PEACHPOS EVENT CALENDAR — SECURE EVENT SAVE
+#
+# The browser Save button remains disabled until endpoint
+# security, retry, and integration tests are complete.
+# ==========================================================
+
+@app.route("/events/save", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def save_peachpos_event():
+    import json
+    from flask import jsonify
+    from services.event_calendar_save import (
+        EventSaveConflict,
+        EventSaveError,
+        EventSaveInvalid,
+        save_event_draft,
+    )
+
+    # Event creation remains Business Administrator only.
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        request.content_length is None
+        or request.content_length > 600000
+    ):
+        abort(413)
+
+    raw_payload = request.form.get("event_payload", "")
+    submission_token = (
+        request.form.get("submission_token") or ""
+    ).strip()
+
+    if not raw_payload or len(raw_payload) > 500000:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "Missing or oversized event data.",
+        }), 400
+
+    if not submission_token or len(submission_token) > 80:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "Missing or invalid submission token.",
+        }), 422
+
+    try:
+        payload = json.loads(raw_payload)
+    except (ValueError, TypeError, RecursionError):
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "Invalid event data format.",
+        }), 400
+
+    if type(payload) is not dict:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "Invalid event submission structure.",
+        }), 422
+
+    # Never accept business, workspace, or user identity
+    # from the submitted event JSON.
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+
+    try:
+        result = save_event_draft(
+            conn,
+            payload,
+            spa_id,
+            workspace_id,
+            actor_id,
+            submission_token,
+        )
+
+    except EventSaveConflict as exc:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": str(exc),
+        }), 409
+
+    except EventSaveInvalid as exc:
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": str(exc),
+        }), 422
+
+    except EventSaveError:
+        app.logger.error(
+            "PeachPOS Event save failed for business %s "
+            "workspace %s: EventSaveError",
+            spa_id, workspace_id,
+        )
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "The event could not be saved.",
+        }), 500
+
+    except Exception as exc:
+        # Do not log raw event payloads or contact information.
+        app.logger.error(
+            "PeachPOS Event save failed for business %s "
+            "workspace %s: %s",
+            spa_id, workspace_id, type(exc).__name__,
+        )
+        return jsonify({
+            "ok": False,
+            "saved": False,
+            "error": "The event could not be saved.",
+        }), 500
+
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    created = result["created"]
+
+    return jsonify({
+        "ok": True,
+        "saved": True,
+        "event_id": result["event_id"],
+        "created": created,
+        "duplicate": result["duplicate"],
+        "message": (
+            "Event saved successfully."
+            if created
+            else "This event was already saved."
+        ),
+    }), (201 if created else 200)
+
+
+# ==========================================================
+# PeachPOS Event Calendar — protected exclusive editing lease
+# ==========================================================
+
+@app.route("/events/<int:event_id>/copy-draft", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_copy_draft(event_id):
+    """Prepare a new-event draft; no reservation, source edit, or DB write."""
+    import json
+    from flask import jsonify
+    from services.event_calendar_edit_read import (
+        EventEditReadError,
+        load_event_edit_payload,
+    )
+    from services.event_calendar_copy import (
+        EventCopyInvalid,
+        build_event_copy_draft,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+    if event_id <= 0:
+        abort(404)
+    if (
+        request.content_length is not None
+        and request.content_length > 16384
+    ):
+        abort(413)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    def respond(payload, status=200):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response, status
+
+    raw_options = request.form.get("copy_options", "")
+    if len(raw_options) > 12000:
+        return respond({"ok": False, "error": "Invalid copy options."}, 400)
+    if raw_options:
+        try:
+            options = json.loads(raw_options)
+        except (ValueError, TypeError, RecursionError):
+            return respond({"ok": False, "error": "Invalid copy options."}, 400)
+    else:
+        options = {}
+
+    if type(options) is not dict or not set(options).issubset({
+        "sections", "target_start_date", "target_end_date"
+    }):
+        return respond({"ok": False, "error": "Invalid copy options."}, 400)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+    conn = get_db_connection()
+    try:
+        conn.set_session(
+            readonly=True,
+            isolation_level="REPEATABLE READ",
+            autocommit=False,
+        )
+        source = load_event_edit_payload(
+            conn,
+            event_id=event_id,
+            spa_id=spa_id,
+            workspace_id=workspace_id,
+        )
+        if source is None:
+            return respond({"ok": False, "error": "Event not found."}, 404)
+
+        try:
+            draft = build_event_copy_draft(source, **options)
+        except EventCopyInvalid as exc:
+            return respond({"ok": False, "error": str(exc)}, 422)
+
+        return respond({
+            "ok": True,
+            "saved": False,
+            "source_event_id": event_id,
+            "source_event_revision": source["event_revision"],
+            "draft": draft,
+        })
+    except EventEditReadError:
+        return respond({
+            "ok": False,
+            "error": "This event cannot be copied.",
+        }, 409)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+
+@app.route("/events/<int:event_id>/edit-draft", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_edit_draft(event_id):
+    from flask import jsonify
+    from services.event_calendar_edit_read import (
+        EventEditReadError,
+        load_event_edit_payload,
+    )
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+
+    if event_id <= 0:
+        abort(404)
+
+    if (
+        request.content_length is not None
+        and request.content_length > 8192
+    ):
+        abort(413)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    def respond(payload, status=200):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response, status
+
+    conn = get_db_connection()
+
+    try:
+        # Read the saved draft in a consistent, read-only transaction.
+        # Opening the editor never acquires a lease.
+        conn.set_session(
+            readonly=True,
+            isolation_level="REPEATABLE READ",
+            autocommit=False,
+        )
+
+        draft = load_event_edit_payload(
+            conn,
+            event_id=event_id,
+            spa_id=spa_id,
+            workspace_id=workspace_id,
+            include_next_occurrence=True,
+        )
+
+        if draft is None:
+            return respond({"status": "not_found"}, 404)
+
+        return respond({
+            "ok": True,
+            "event": draft,
+        })
+
+    except EventEditReadError:
+        return respond({
+            "status": "unavailable",
+            "message": "This saved event cannot be opened for editing.",
+        }, 409)
+
+    finally:
+        # Read-only request: never commit or acquire an edit lock.
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+
+@app.route("/events/<int:event_id>/edit-save-unlocked", methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def peachpos_event_edit_save_unlocked(event_id):
+    """Save an existing event with server identity and an atomic revision guard.
+
+    Never accept the actor, business, or workspace from the browser.
+    Only this edit endpoint calls update_event_draft; Create Event is separate.
+    """
+    import json
+    from flask import jsonify
+    from services.event_calendar_edit_update import (
+        EventEditUpdateConflict,
+        EventEditUpdateError,
+        EventEditUpdateInvalid,
+        update_event_draft,
+    )
+
+    def respond(payload, status=200):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response, status
+
+    if current_business_unit_membership_role_code() != "organization_admin":
+        abort(403)
+    if event_id <= 0:
+        abort(404)
+    if (
+        request.content_length is None
+        or request.content_length > 600000
+    ):
+        abort(413)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_payload = request.form.get("event_payload", "")
+    revision_raw = (request.form.get("expected_revision") or "").strip()
+
+    if not raw_payload or len(raw_payload) > 500000:
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Missing or oversized event data.",
+        }, 400)
+    if (
+        not revision_raw.isascii()
+        or not revision_raw.isdecimal()
+        or len(revision_raw) > 18
+    ):
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event revision.",
+        }, 400)
+    expected_revision = int(revision_raw)
+    if expected_revision < 1:
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event revision.",
+        }, 400)
+
+    try:
+        payload = json.loads(raw_payload)
+    except (ValueError, TypeError, RecursionError):
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event data format.",
+        }, 400)
+    if type(payload) is not dict:
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event submission structure.",
+        }, 422)
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+    conn = get_db_connection()
+
+    try:
+        # Derive display name from the authenticated database user.
+        # JSON key access avoids assumptions about legacy user-name columns.
+        # No browser-provided identity is trusted or reflected in history.
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COALESCE(
+                    NULLIF(BTRIM(CONCAT_WS(' ',
+                        NULLIF(BTRIM(to_jsonb(u)->>'first_name'), ''),
+                        NULLIF(BTRIM(to_jsonb(u)->>'last_name'), '')
+                    )), ''),
+                    NULLIF(BTRIM(to_jsonb(u)->>'display_name'), ''),
+                    NULLIF(BTRIM(to_jsonb(u)->>'full_name'), ''),
+                    NULLIF(BTRIM(to_jsonb(u)->>'username'), ''),
+                    'Administrator #' || u.user_id::text
+                )
+                FROM public.users AS u
+                WHERE u.user_id = %s
+                """,
+                (actor_id,),
+            )
+            editor = cur.fetchone()
+
+        if not editor or not editor[0]:
+            return respond({
+                "ok": False, "saved": False,
+                "error": "Administrator account is unavailable.",
+            }, 403)
+        editor_name = str(editor[0]).strip()[:200]
+
+        result = update_event_draft(
+            conn, payload,
+            spa_id=spa_id,
+            workspace_id=workspace_id,
+            event_id=event_id,
+            actor_id=actor_id,
+            actor_display_name=editor_name,
+            expected_revision=expected_revision,
+        )
+        return respond({
+            "ok": True,
+            "saved": True,
+            "event_id": result["event_id"],
+            "event_revision": result["revision_after"],
+            "message": "Event changes saved successfully.",
+        })
+    except EventEditUpdateConflict as exc:
+        return respond({
+            "ok": False, "saved": False,
+            "error": str(exc),
+        }, 409)
+    except EventEditUpdateInvalid as exc:
+        return respond({
+            "ok": False, "saved": False,
+            "error": str(exc),
+        }, 422)
+    except ValueError:
+        return respond({
+            "ok": False, "saved": False,
+            "error": "Invalid event edit request.",
+        }, 400)
+    except EventEditUpdateError:
+        app.logger.error(
+            "PeachPOS Edit Event failed for business %s workspace %s",
+            spa_id, workspace_id,
+        )
+        return respond({
+            "ok": False, "saved": False,
+            "error": "The event could not be updated.",
+        }, 500)
+    except Exception:
+        app.logger.exception(
+            "Unexpected PeachPOS Edit Event failure for business %s "
+            "workspace %s", spa_id, workspace_id,
+        )
+        return respond({
+            "ok": False, "saved": False,
+            "error": "The event could not be updated.",
+        }, 500)
+    finally:
+        conn.close()
+
+
+
+
+# ==========================================================
+# PeachPOS Event Calendar — protected editable event data
+# ==========================================================
+
+
+
+
+
+@app.route("/events/add", methods=["GET"])
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def event_new():
+    # IDs on the query string only select a protected source; no draft
+    # is loaded until a POST with the administrator's CSRF token.
+    edit_raw = request.args.get("edit")
+    copy_raw = request.args.get("copy")
+    if edit_raw is not None and copy_raw is not None:
+        abort(404)
+    edit_event_id = None
+    copy_event_id = None
+    if copy_raw is not None:
+        if (not copy_raw.isascii() or not copy_raw.isdecimal()
+                or len(copy_raw) > 18):
+            abort(404)
+        copy_event_id = int(copy_raw)
+        if copy_event_id <= 0:
+            abort(404)
+
+    if edit_raw is not None:
+        if (
+            not edit_raw.isascii()
+            or not edit_raw.isdecimal()
+            or len(edit_raw) > 18
+        ):
+            abort(404)
+
+        edit_event_id = int(edit_raw)
+        if edit_event_id <= 0:
+            abort(404)
+
+    # Initial development preview: Business Administrators only.
+    # A dedicated event-management permission will be reviewed
+    # before employee scheduling becomes available.
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+
+    labels = {
+        slot: f"Default {slot}"
+        for slot in (1, 2, 3)
+    }
+
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor() as cur:
+
+            cur.execute(
+                """
+                SELECT slot_number, field_label
+                FROM event_calendar_custom_labels
+                WHERE spa_id = %s
+                ORDER BY slot_number
+                """,
+                (spa_id,),
+            )
+
+            for slot, label in cur.fetchall():
+                if slot in labels:
+                    labels[slot] = label
+
+            cur.execute(
+                """
+                SELECT
+                    event_unit_id,
+                    unit_name,
+                    unit_type
+                FROM event_units
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND is_active = TRUE
+                ORDER BY LOWER(unit_name)
+                """,
+                (spa_id, workspace_id),
+            )
+
+            units = [
+                {
+                    "event_unit_id": record[0],
+                    "unit_name": record[1],
+                    "unit_type": record[2],
+                }
+                for record in cur.fetchall()
+            ]
+
+            # Existing Employee Management records only.
+            # No separate event employee database or login required.
+            # Both membership and employee must be active.
+
+            cur.execute(
+                """
+                SELECT
+                    e.employee_id,
+                    e.first_name,
+                    e.last_name
+                FROM employee_business_unit_memberships AS m
+                JOIN employees AS e
+                  ON e.spa_id = m.spa_id
+                 AND e.employee_id = m.employee_id
+                WHERE m.spa_id = %s
+                  AND m.business_unit_id = %s
+                  AND m.is_active = TRUE
+                  AND e.is_active = TRUE
+                ORDER BY
+                    LOWER(e.last_name),
+                    LOWER(e.first_name),
+                    e.employee_id
+                """,
+                (spa_id, workspace_id),
+            )
+
+            event_employees = [
+                {
+                    "employee_id": record[0],
+                    "display_name": (
+                        str(record[1]).strip()
+                        + " "
+                        + str(record[2]).strip()
+                    ).strip(),
+                }
+                for record in cur.fetchall()
+            ]
+
+    finally:
+        conn.rollback()
+        conn.close()
+
+    return render_template(
+        "event_new.html",
+        event_custom_labels=labels,
+        available_event_units=units,
+        available_event_employees=event_employees,
+        event_csrf_token=_security_form_csrf_token(),
+        event_edit_id=edit_event_id,
+        event_copy_id=copy_event_id,
+    )
+
+
+@app.route("/event-units")
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def event_units_home():
+    spa_id, workspace_id, _actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                event_unit_id,
+                unit_name,
+                unit_type,
+                unit_identifier,
+                calendar_color,
+                is_active
+            FROM event_units
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            ORDER BY is_active DESC, LOWER(unit_name)
+            """,
+            (spa_id, workspace_id),
+        )
+
+        keys = (
+            "event_unit_id", "unit_name", "unit_type",
+            "unit_identifier", "calendar_color", "is_active"
+        )
+
+        units = [
+            dict(zip(keys, record))
+            for record in cur.fetchall()
+        ]
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return render_template(
+        "event_units.html",
+        event_units=units,
+        event_unit_types=EVENT_UNIT_TYPES,
+        event_unit_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route("/event-units/add", methods=["GET", "POST"])
+@app.route(
+    "/event-units/<int:event_unit_id>/edit",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def event_unit_form(event_unit_id=None):
+    from psycopg2 import IntegrityError
+
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        existing = None
+
+        if event_unit_id is not None:
+            cur.execute(
+                """
+                SELECT
+                    unit_name,
+                    unit_type,
+                    unit_identifier,
+                    description,
+                    calendar_color,
+                    notes
+                FROM event_units
+                WHERE event_unit_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                """,
+                (event_unit_id, spa_id, workspace_id),
+            )
+
+            row = cur.fetchone()
+
+            if row is None:
+                abort(404)
+
+            fields = (
+                "unit_name", "unit_type", "unit_identifier",
+                "description", "calendar_color", "notes"
+            )
+
+            existing = dict(zip(fields, row))
+
+        values = existing or {
+            "unit_name": "",
+            "unit_type": "truck",
+            "unit_identifier": "",
+            "description": "",
+            "calendar_color": "#E87929",
+            "notes": "",
+        }
+
+        if request.method == "POST":
+            if not _security_form_csrf_valid(
+                request.form.get("security_csrf_token")
+            ):
+                abort(400)
+
+            try:
+                values = _event_unit_form_values(request.form)
+            except ValueError as exc:
+                flash(str(exc), "error")
+                values = dict(request.form)
+                return render_template(
+                    "event_unit_form.html",
+                    values=values,
+                    event_unit_id=event_unit_id,
+                    event_unit_types=EVENT_UNIT_TYPES,
+                    event_unit_csrf_token=_security_form_csrf_token(),
+                ), 400
+
+            try:
+                params = (
+                    values["unit_name"],
+                    values["unit_type"],
+                    values["unit_identifier"] or None,
+                    values["description"] or None,
+                    values["calendar_color"],
+                    values["notes"] or None,
+                )
+
+                if event_unit_id is None:
+                    cur.execute(
+                        """
+                        INSERT INTO event_units (
+                            spa_id, business_unit_id,
+                            unit_name, unit_type,
+                            unit_identifier, description,
+                            calendar_color, notes, created_by
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s
+                        )
+                        """,
+                        (
+                            spa_id, workspace_id,
+                            *params, actor_id
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE event_units
+                        SET unit_name = %s,
+                            unit_type = %s,
+                            unit_identifier = %s,
+                            description = %s,
+                            calendar_color = %s,
+                            notes = %s,
+                            updated_at = CURRENT_TIMESTAMP,
+                            updated_by = %s
+                        WHERE event_unit_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                        """,
+                        (
+                            *params,
+                            actor_id,
+                            event_unit_id,
+                            spa_id,
+                            workspace_id,
+                        ),
+                    )
+
+                    if cur.rowcount != 1:
+                        conn.rollback()
+                        abort(404)
+
+                conn.commit()
+
+            except IntegrityError as exc:
+                conn.rollback()
+
+                if getattr(exc, "pgcode", None) != "23505":
+                    raise
+
+                flash(
+                    "An Event Unit with that name already "
+                    "exists in this workspace.",
+                    "error",
+                )
+
+                return render_template(
+                    "event_unit_form.html",
+                    values=values,
+                    event_unit_id=event_unit_id,
+                    event_unit_types=EVENT_UNIT_TYPES,
+                    event_unit_csrf_token=_security_form_csrf_token(),
+                ), 409
+
+            flash("Event Unit saved successfully.", "success")
+            return redirect(url_for("event_units_home"))
+
+        return render_template(
+            "event_unit_form.html",
+            values=values,
+            event_unit_id=event_unit_id,
+            event_unit_types=EVENT_UNIT_TYPES,
+            event_unit_csrf_token=_security_form_csrf_token(),
+        )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/event-units/<int:event_unit_id>/status",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+@require_workspace_permission("can_manage_event_units")
+def event_unit_status(event_unit_id):
+    spa_id, workspace_id, actor_id = _event_unit_scope()
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    requested = request.form.get("status")
+
+    if requested not in {"active", "inactive"}:
+        abort(400)
+
+    active = requested == "active"
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE event_units
+            SET is_active = %s,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = %s
+            WHERE event_unit_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                active, actor_id, event_unit_id,
+                spa_id, workspace_id
+            ),
+        )
+
+        if cur.rowcount != 1:
+            conn.rollback()
+            abort(404)
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Event Unit reactivated." if active
+        else "Event Unit archived.",
+        "success",
+    )
+
+    return redirect(url_for("event_units_home"))
+
+
+
+# ==========================================================
+# EVENT CALENDAR — BUSINESS CUSTOM FIELD LABELS
+# ==========================================================
+
+@app.route(
+    "/admin/event-custom-labels",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_subscription_feature("event_calendar")
+def save_event_custom_labels():
+
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    spa_id = current_spa_id()
+    actor_id = session.get("user_id")
+
+    if spa_id is None or actor_id is None:
+        abort(403)
+
+    labels = {}
+
+    for slot in (1, 2, 3):
+        raw = request.form.get(
+            f"event_custom_label_{slot}"
+        )
+
+        if raw is None:
+            abort(400)
+
+        label = raw.strip() or f"Default {slot}"
+
+        if (
+            len(label) > 100
+            or any(ord(ch) < 32 for ch in label)
+        ):
+            abort(400)
+
+        labels[slot] = label
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT to_regclass(
+                'public.event_calendar_custom_labels'
+            )
+        """)
+
+        if cur.fetchone()[0] is None:
+            abort(503)
+
+        for slot, label in labels.items():
+            cur.execute(
+                """
+                INSERT INTO event_calendar_custom_labels (
+                    spa_id,
+                    slot_number,
+                    field_label,
+                    updated_by
+                )
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (spa_id, slot_number)
+                DO UPDATE SET
+                    field_label = EXCLUDED.field_label,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (spa_id, slot, label, actor_id),
+            )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Event custom field names saved successfully.",
+        "success"
+    )
+
+    return redirect(url_for("admin"))
+
+
 @app.route("/admin")
 @login_required
 @spa_required
@@ -128638,8 +135005,61 @@ def admin():
     label_rows = cur.fetchall()
     dropdown_labels = {row[0]: row[1] for row in label_rows}
 
+    cur.execute("SELECT preferred_calendar_type FROM spas WHERE spa_id = %s", (spa_id,))
+    calendar_row = cur.fetchone()
+    stored_calendar_type = calendar_row[0] if calendar_row else None
+
+
+    event_custom_fields_visible = has_subscription_feature(
+        "event_calendar"
+    )
+
+    event_custom_labels = {
+        slot: f"Default {slot}"
+        for slot in (1, 2, 3)
+    }
+
+    event_custom_fields_ready = False
+
+    if event_custom_fields_visible:
+        cur.execute("""
+            SELECT to_regclass(
+                'public.event_calendar_custom_labels'
+            )
+        """)
+
+        event_custom_fields_ready = (
+            cur.fetchone()[0] is not None
+        )
+
+        if event_custom_fields_ready:
+            cur.execute(
+                """
+                SELECT slot_number, field_label
+                FROM event_calendar_custom_labels
+                WHERE spa_id = %s
+                """,
+                (spa_id,),
+            )
+
+            for slot, label in cur.fetchall():
+                if slot in event_custom_labels:
+                    event_custom_labels[slot] = label
+
     cur.close()
     conn.close()
+
+
+    calendar_available_types = _available_preferred_calendar_types()
+    calendar_current_type = _effective_preferred_calendar_type(
+        stored_calendar_type,
+        calendar_available_types,
+    )
+    calendar_can_edit = (
+        current_business_unit_membership_role_code()
+        == "organization_admin"
+    )
+    calendar_csrf_token = _security_form_csrf_token()
 
     return render_template(
         "admin.html",
@@ -128647,7 +135067,14 @@ def admin():
         timezone_options=BUSINESS_TIMEZONE_OPTIONS,
         utc_now=utc_now,
         spa_now=spa_now,
-        dropdown_labels=dropdown_labels
+        dropdown_labels=dropdown_labels,
+        calendar_available_types=calendar_available_types,
+        calendar_current_type=calendar_current_type,
+        calendar_can_edit=calendar_can_edit,
+        calendar_csrf_token=calendar_csrf_token,
+        event_custom_fields_visible=event_custom_fields_visible,
+        event_custom_fields_ready=event_custom_fields_ready,
+        event_custom_labels=event_custom_labels
     )
 
 
@@ -130341,6 +136768,7 @@ def _booking_validate_selected_slot(
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -132739,6 +139167,23 @@ def _render_public_booking_page(
             WHERE bs.public_booking_slug = %s
               AND bu.is_active = TRUE
               AND s.active = TRUE
+
+              AND EXISTS (
+                  SELECT 1
+                  FROM subscription_tiers st
+                  JOIN subscription_tier_features stf
+                    ON stf.subscription_tier_id =
+                       st.subscription_tier_id
+                  JOIN subscription_features sf
+                    ON sf.subscription_feature_id =
+                       stf.subscription_feature_id
+                  WHERE st.subscription_tier_id =
+                        s.subscription_tier_id
+                    AND st.is_active = TRUE
+                    AND st.tier_code <> 'pos'
+                    AND sf.feature_key = 'appointments'
+                    AND sf.is_active = TRUE
+              )
 
             LIMIT 1
         """, (public_booking_slug,))
@@ -135537,6 +141982,23 @@ def public_booking_confirm(
               AND bs.public_booking_enabled = TRUE
               AND bu.is_active = TRUE
               AND s.active = TRUE
+
+              AND EXISTS (
+                  SELECT 1
+                  FROM subscription_tiers st
+                  JOIN subscription_tier_features stf
+                    ON stf.subscription_tier_id =
+                       st.subscription_tier_id
+                  JOIN subscription_features sf
+                    ON sf.subscription_feature_id =
+                       stf.subscription_feature_id
+                  WHERE st.subscription_tier_id =
+                        s.subscription_tier_id
+                    AND st.is_active = TRUE
+                    AND st.tier_code <> 'pos'
+                    AND sf.feature_key = 'appointments'
+                    AND sf.is_active = TRUE
+              )
             LIMIT 1
         """, (public_booking_slug,))
 
@@ -136111,6 +142573,7 @@ def public_booking_confirm(
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -136737,6 +143200,7 @@ def booking_control_center():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -136814,6 +143278,7 @@ def complete_booking_control_center_onboarding():
 )
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -137045,6 +143510,7 @@ def save_booking_notification_settings():
 @app.route("/booking/public-preview")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -137103,6 +143569,7 @@ def booking_public_preview():
 @app.route("/booking/availability-test")
 @login_required
 @spa_required
+@require_peachbook_subscription_access
 @require_workspace_permission(
     "can_manage_online_booking"
 )
@@ -139441,6 +145908,98 @@ def scheduled_purge_system_logs():
         )
 
 
+
+def scheduled_refresh_trial_billing_snapshots():
+    """
+    Refresh due Stripe trial billing snapshots without blocking
+    customer requests.
+
+    Database claims enforce cross-worker concurrency protection.
+    At most eight trial businesses are processed per run.
+    """
+    from services.stripe_billing_refresh import (
+        run_billing_refresh,
+    )
+
+    environment = get_stripe_environment()
+    conn = None
+    cur = None
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT a.spa_id
+            FROM stripe_billing_accounts a
+            LEFT JOIN stripe_billing_display_snapshots snap
+              ON snap.stripe_billing_account_id =
+                 a.stripe_billing_account_id
+            WHERE a.environment = %s
+              AND a.stripe_subscription_status = 'trialing'
+              AND a.stripe_subscription_id IS NOT NULL
+              AND (
+                  snap.last_auto_attempt_at IS NULL
+                  OR snap.last_auto_attempt_at
+                     <= NOW() - INTERVAL '24 hours'
+              )
+              AND (
+                  snap.verified_at IS NULL
+                  OR snap.verified_at
+                     <= NOW() - INTERVAL '24 hours'
+              )
+              AND (
+                  snap.refresh_lock_expires_at IS NULL
+                  OR snap.refresh_lock_expires_at <= NOW()
+              )
+            ORDER BY
+                snap.last_auto_attempt_at NULLS FIRST,
+                a.stripe_billing_account_id
+            LIMIT 8
+            """,
+            (environment,),
+        )
+
+        spa_ids = [row[0] for row in cur.fetchall()]
+
+    except Exception:
+        app.logger.exception(
+            "Scheduled trial billing candidate lookup failed."
+        )
+        return
+
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+    # No database connection remains open during Stripe requests.
+    for spa_id in spa_ids:
+        try:
+            result = run_billing_refresh(
+                connection_factory=get_db_connection,
+                spa_id=spa_id,
+                environment=environment,
+                mode="auto",
+            )
+
+            if result.get("status") == "unavailable":
+                app.logger.warning(
+                    "Trial billing verification unavailable "
+                    "for business %s.",
+                    spa_id,
+                )
+
+        except Exception:
+            app.logger.exception(
+                "Scheduled trial billing refresh failed "
+                "for business %s.",
+                spa_id,
+            )
+
+
 def start_scheduler():
     scheduler = BackgroundScheduler()
 
@@ -139626,6 +146185,18 @@ def start_scheduler():
             flush=True
         )
 
+
+    scheduler.add_job(
+        scheduled_refresh_trial_billing_snapshots,
+        "interval",
+        hours=1,
+        id="trial_billing_snapshot_refresh_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+        next_run_time=startup_time + timedelta(seconds=210),
+    )
 
     scheduler.start()
     print("Scheduler started.", flush=True)

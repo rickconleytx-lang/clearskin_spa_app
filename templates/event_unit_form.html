@@ -1,0 +1,134 @@
+
+{% extends "base.html" %}
+{% block title %}Event Unit{% endblock %}
+{% block content %}
+
+<h1>
+    {{ "Edit Truck / Cart / Booth" if event_unit_id else "Add Truck / Cart / Booth" }}
+</h1>
+
+<p>
+    <a href="{{ url_for('event_units_home') }}">
+        Back to Trucks, Trailers, Carts & Booths
+    </a>
+</p>
+
+<p>
+    Register the physical truck, trailer, cart, or booth
+    that you will assign to events.
+</p>
+
+<p>
+    <strong>Do not enter an event name or location here.</strong>
+    You'll enter those separately when creating an event.
+</p>
+
+<form method="POST"
+      style="max-width:650px;">
+
+    <input type="hidden"
+           name="security_csrf_token"
+           value="{{ event_unit_csrf_token }}">
+
+    <div class="form-group">
+        <label for="unit_name">Unit Name</label>
+        <input id="unit_name"
+               name="unit_name"
+               type="text"
+               maxlength="150"
+               required
+               value="{{ values.unit_name }}">
+    </div>
+
+    <div class="form-group">
+        <label for="unit_type">Unit Type</label>
+        <select id="unit_type" name="unit_type" required>
+            {% for code, label in event_unit_types.items() %}
+            <option value="{{ code }}"
+                {% if values.unit_type == code %}selected{% endif %}>
+                {{ label }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="unit_identifier">Unit Identifier (optional)</label>
+        <input id="unit_identifier"
+               name="unit_identifier"
+               maxlength="80"
+               value="{{ values.unit_identifier or '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="description">Description (optional)</label>
+        <textarea id="description" name="description"
+                  maxlength="2000">{{ values.description or '' }}</textarea>
+    </div>
+
+    <div class="form-group">
+        <label for="calendar_color">Calendar Color</label>
+        <div style="display:flex; align-items:center;
+                    flex-wrap:wrap; gap:14px;">
+
+            <input type="color"
+                   id="calendar_color"
+                   name="calendar_color"
+                   required
+                   value="{{ values.calendar_color or '#E87929' }}">
+
+            <span>
+                Selected Color:
+                <strong id="event_unit_color_value">
+                    {{ values.calendar_color or '#E87929' }}
+                </strong>
+            </span>
+
+        </div>
+
+        <p style="font-size:0.9em; opacity:0.8;">
+            The selected color is shown above.
+            The color picker's text field may appear blank
+            on some devices.
+        </p>
+
+        <script>
+        (function () {
+            const picker =
+                document.getElementById("calendar_color");
+
+            const display =
+                document.getElementById("event_unit_color_value");
+
+            if (!picker || !display) return;
+
+            function updateColorDisplay() {
+                display.textContent =
+                    picker.value.toUpperCase();
+            }
+
+            picker.addEventListener(
+                "input", updateColorDisplay
+            );
+
+            picker.addEventListener(
+                "change", updateColorDisplay
+            );
+
+            updateColorDisplay();
+        })();
+        </script>
+    </div>
+
+    <div class="form-group">
+        <label for="notes">Notes (optional)</label>
+        <textarea id="notes" name="notes"
+                  maxlength="5000">{{ values.notes or '' }}</textarea>
+    </div>
+
+    <button type="submit" class="btn">
+        Save Unit
+    </button>
+</form>
+
+{% endblock %}

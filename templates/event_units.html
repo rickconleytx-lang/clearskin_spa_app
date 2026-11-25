@@ -1,0 +1,175 @@
+
+{% extends "base.html" %}
+{% block title %}Manage Trucks, Trailers, Carts & Booths{% endblock %}
+{% block content %}
+
+<h1>Manage Trucks, Trailers, Carts & Booths</h1>
+
+<p>
+    Register each physical truck, trailer, cart, or booth once. Event names, locations, dates, and operating hours are entered separately when creating an event.
+</p>
+
+<p>
+    <a class="btn" href="{{ url_for('event_unit_form') }}">
+        Add Truck / Cart / Booth
+    </a>
+</p>
+
+
+<style>
+.psp-event-unit-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fill, minmax(min(100%, 350px), 1fr));
+    gap: 16px;
+    max-width: 1080px;
+    margin: 20px 0;
+}
+
+.psp-event-unit-card {
+    border: 1px solid rgba(100, 85, 85, 0.25);
+    border-radius: 12px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.psp-event-unit-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.psp-event-unit-color {
+    width: 12px;
+    min-width: 12px;
+    height: 54px;
+    border-radius: 5px;
+}
+
+.psp-event-unit-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.psp-event-unit-name {
+    font-size: 1.1rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.psp-event-unit-meta {
+    margin-top: 5px;
+    opacity: 0.8;
+}
+
+.psp-event-unit-status {
+    margin-top: 8px;
+    font-weight: 600;
+}
+
+.psp-event-unit-inactive {
+    color: #B42318;
+    font-weight: 700;
+}
+
+.psp-event-unit-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: auto;
+}
+
+.psp-event-unit-actions form {
+    margin: 0;
+}
+
+.psp-event-unit-actions .btn {
+    white-space: nowrap;
+}
+</style>
+
+{% if event_units %}
+<div class="psp-event-unit-grid">
+
+    {% for unit in event_units %}
+
+    <div class="psp-event-unit-card">
+
+        <div class="psp-event-unit-top">
+
+            <span
+                class="psp-event-unit-color"
+                aria-label="Calendar color"
+                style="background: {{ unit.calendar_color }};">
+            </span>
+
+            <div class="psp-event-unit-details">
+
+                <div class="psp-event-unit-name">
+                    {{ unit.unit_name }}
+                </div>
+
+                <div class="psp-event-unit-meta">
+                    {{ event_unit_types.get(unit.unit_type, "Custom") }}
+
+                    {% if unit.unit_identifier %}
+                        · {{ unit.unit_identifier }}
+                    {% endif %}
+                </div>
+
+                <div class="psp-event-unit-status
+                    {% if not unit.is_active %}
+                        psp-event-unit-inactive
+                    {% endif %}">
+
+                    {{ "Active" if unit.is_active else "Inactive" }}
+
+                </div>
+            </div>
+        </div>
+
+        <div class="psp-event-unit-actions">
+
+            <a class="btn"
+               href="{{ url_for(
+                   'event_unit_form',
+                   event_unit_id=unit.event_unit_id
+               ) }}">
+                Edit
+            </a>
+
+            <form method="POST"
+                  action="{{ url_for(
+                      'event_unit_status',
+                      event_unit_id=unit.event_unit_id
+                  ) }}">
+
+                <input type="hidden"
+                       name="security_csrf_token"
+                       value="{{ event_unit_csrf_token }}">
+
+                <input type="hidden"
+                       name="status"
+                       value="{{ 'inactive' if unit.is_active else 'active' }}">
+
+                <button type="submit" class="btn">
+                    {{ "Archive" if unit.is_active else "Reactivate" }}
+                </button>
+
+            </form>
+        </div>
+
+    </div>
+
+    {% endfor %}
+
+</div>
+{% else %}
+<p>No trucks, trailers, carts, or booths have been registered yet.</p>
+{% endif %}
+
+{% endblock %}

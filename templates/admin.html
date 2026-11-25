@@ -116,6 +116,179 @@ Cat 2
     </a>
 </div>
 <br>
+
+<div class="admin-section">
+    <h2>Calendar Settings</h2>
+
+    {% if "event" in calendar_available_types
+          and calendar_can_edit %}
+    <p>
+        <a class="btn" href="{{ url_for('event_units_home') }}">
+            Manage Trucks, Trailers, Carts & Booths
+        </a>
+    </p>
+    {% endif %}
+
+
+    <p>
+        Select the preferred calendar for your business.
+        Available calendars depend on your Peach Suite Pro subscription.
+    </p>
+
+    {% if calendar_available_types %}
+
+        {% if calendar_can_edit %}
+        <form method="POST"
+              action="{{ url_for('save_calendar_settings') }}">
+
+            <input type="hidden"
+                   name="security_csrf_token"
+                   value="{{ calendar_csrf_token }}">
+
+            <div class="form-group">
+                <label for="calendar_type">Preferred Calendar</label>
+
+                <select name="calendar_type"
+                        id="calendar_type"
+                        required>
+
+                    {% if "appointment" in calendar_available_types %}
+                    <option value="appointment"
+                            {% if calendar_current_type == "appointment" %}
+                                selected
+                            {% endif %}>
+                        Appointment Calendar
+                    </option>
+                    {% endif %}
+
+                    {% if "event" in calendar_available_types %}
+                    <option value="event"
+                            {% if calendar_current_type == "event" %}
+                                selected
+                            {% endif %}>
+                        Event Calendar
+                    </option>
+                    {% endif %}
+
+                </select>
+            </div>
+
+            <p>
+                Changing your preferred calendar does not delete,
+                cancel, or convert existing calendar records.
+            </p>
+
+            <button type="submit" class="btn">
+                Save Calendar Settings
+            </button>
+        </form>
+
+        {% else %}
+        <p>
+            <strong>Preferred Calendar:</strong>
+            {{ "Event Calendar" if calendar_current_type == "event"
+               else "Appointment Calendar" }}
+        </p>
+        <p>Only a Business Administrator can change this setting.</p>
+        {% endif %}
+
+    {% else %}
+        <p>
+            No calendar is currently available under this subscription.
+        </p>
+    {% endif %}
+</div>
+
+<br>
+
+
+{% if event_custom_fields_visible %}
+
+<div class="admin-section">
+
+    <h2 id="event-custom-fields">Event Custom Fields</h2>
+
+    <p>
+        Customize three optional fields used when
+        creating and editing events.
+    </p>
+
+    <p>
+        The field names apply to your business.
+        Each event can have its own values.
+    </p>
+
+    {% if not event_custom_fields_ready %}
+
+        <p>
+            Event custom field setup is pending
+            installation of the Event Calendar database.
+        </p>
+
+    {% elif calendar_can_edit %}
+
+        <form method="POST"
+              action="{{ url_for('save_event_custom_labels') }}">
+
+            <input type="hidden"
+                   name="security_csrf_token"
+                   value="{{ calendar_csrf_token }}">
+
+            {% for slot in (1, 2, 3) %}
+
+            <div class="form-group">
+
+                <label for="event_custom_label_{{ slot }}">
+                    Custom Field {{ slot }}
+                </label>
+
+                <input
+                    type="text"
+                    id="event_custom_label_{{ slot }}"
+                    name="event_custom_label_{{ slot }}"
+                    maxlength="100"
+                    required
+                    value="{{ event_custom_labels[slot] }}"
+                    placeholder="Default {{ slot }}">
+
+            </div>
+
+            {% endfor %}
+
+            <p>
+                Changing a field name does not erase
+                existing event information. Previously
+                saved values retain their original labels.
+            </p>
+
+            <button type="submit" class="btn">
+                Save Event Field Names
+            </button>
+
+        </form>
+
+    {% else %}
+
+        {% for slot in (1, 2, 3) %}
+        <p>
+            <strong>Field {{ slot }}:</strong>
+            {{ event_custom_labels[slot] }}
+        </p>
+        {% endfor %}
+
+        <p>
+            Only a Business Administrator can
+            change these field names.
+        </p>
+
+    {% endif %}
+
+</div>
+
+<br>
+
+{% endif %}
+
 <p style="color: red";>Important: Each Business MUST set its Time Zone</p>
 
 <div class="admin-section">

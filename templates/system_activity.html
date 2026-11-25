@@ -241,8 +241,8 @@
 
 
 
-        {% set current_date = log.created_at.strftime("%b %-d") %}
-        {% set previous_date = logs[loop.index0 - 1].created_at.strftime("%b %-d") if not loop.first else "" %}
+        {% set current_date = log.created_at_central.strftime("%b %-d") %}
+        {% set previous_date = logs[loop.index0 - 1].created_at_central.strftime("%b %-d") if not loop.first else "" %}
 
         <div style="display:flex; gap:14px; padding:12px 0; border-bottom:1px solid #eee;">
 
@@ -260,7 +260,7 @@
                 </div>
 
                 <div style="font-size:14px; font-weight:600; color:#333;">
-                    {{ log.created_at.strftime("%-I:%M %p") }}
+                    {{ log.created_at_central.strftime("%-I:%M %p %Z") }}
                 </div>
             </div>
 
@@ -287,6 +287,60 @@
                 <div style="color:#333;">
                     {{ log.message }}
                 </div>
+
+                {% if log.login_failure_reason %}
+                    {% set login_reasons = {
+                        'no_active_account': 'No active account matched',
+                        'invalid_password': 'Incorrect password',
+                        'account_locked': 'Account temporarily locked',
+                        'lockout_triggered': 'Repeated failures triggered lockout'
+                    } %}
+
+                    <div style="font-size:12px; color:#555; margin-top:7px;">
+                        <div>
+                            <strong>Attempted email:</strong>
+                            {{ log.attempted_email_display }}
+                        </div>
+
+                        <div style="margin-top:3px;">
+                            <strong>Reason:</strong>
+                            {{ login_reasons.get(
+                                log.login_failure_reason,
+                                'Login rejected'
+                            ) }}
+                        </div>
+
+                        <div style="margin-top:3px;">
+                            <strong>Login channel:</strong>
+                            {{ log.login_channel or 'Unknown' }}
+                            |
+                            <strong>Reported device:</strong>
+                            {{ log.login_browser_family or 'Unknown' }}
+                            /
+                            {{ log.login_platform_family or 'Unknown' }}
+                        </div>
+                    </div>
+                {% endif %}
+
+                    {% if log.spa_id is not none %}
+                        <div style="color:#666; font-size:12px; margin-top:6px;">
+                            Business:
+                            {{ log.affected_business_name or 'Unknown business' }}
+                            (ID {{ log.spa_id }})
+
+                            {% if log.related_type == 'business_login_user'
+                                  and log.related_id is not none %}
+                                | User ID: {{ log.related_id }}
+                            {% endif %}
+                        </div>
+                    {% elif log.category|upper == 'SECURITY'
+                          and log.related_type == 'business_login' %}
+                        <div style="color:#666; font-size:12px; margin-top:6px;">
+                            Business: Unknown — no active user account matched
+                        </div>
+                    {% endif %}
+
+
             </div>
 
         </div>

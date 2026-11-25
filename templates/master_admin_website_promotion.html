@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a
+        href="{{ url_for('master_admin_website_management') }}"
+        class="btn"
+    >
+        Back to Website Management
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        Home Page — Product Promotion
+    </h1>
+
+    <p>
+        Editing {{ content_source }}.
+        Save Draft stores your changes privately without
+        changing the public website.
+    </p>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <form
+            method="POST"
+            action="{{ url_for('master_admin_website_promotion_save_draft') }}"
+        >
+
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <input
+                type="hidden"
+                name="expected_draft_revision_id"
+                value="{{ draft_revision_id if draft_revision_id is not none else '' }}"
+            >
+
+            <div style="margin-top: 12px;">
+                <label for="cms-promotion-label">
+                    <strong>Product Label</strong>
+                </label>
+                <input
+                    id="cms-promotion-label"
+                    name="product_label"
+                    type="text"
+                    maxlength="80"
+                    required
+                    value="{{ promotion.product_label }}"
+                    style="display: block; width: 100%;
+                           box-sizing: border-box; margin-top: 6px;"
+                >
+            </div>
+
+            <div style="margin-top: 20px;">
+                <label for="cms-promotion-headline">
+                    <strong>Promotion Headline</strong>
+                </label>
+
+                <p style="margin: 6px 0;">
+                    Text wraps automatically. Press Enter to
+                    create a line break that will be retained
+                    when the content is published.
+                </p>
+
+                <textarea
+                    id="cms-promotion-headline"
+                    name="headline"
+                    maxlength="240"
+                    rows="5"
+                    required
+                    style="display: block; width: 100%;
+                           box-sizing: border-box; margin-top: 6px;"
+                >{{ promotion.headline }}</textarea>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <label for="cms-promotion-price">
+                    <strong>Monthly Price Display</strong>
+                </label>
+                <input
+                    id="cms-promotion-price"
+                    name="monthly_price"
+                    type="text"
+                    maxlength="32"
+                    required
+                    value="{{ promotion.monthly_price }}"
+                    style="display: block; width: 100%;
+                           box-sizing: border-box; margin-top: 6px;"
+                >
+                <p style="margin: 6px 0;">
+                    Example: $49. The website's / month label
+                    remains part of its existing design.
+                </p>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <label for="cms-promotion-description">
+                    <strong>Pricing Description</strong>
+                </label>
+                <input
+                    id="cms-promotion-description"
+                    name="pricing_description"
+                    type="text"
+                    maxlength="300"
+                    required
+                    value="{{ promotion.pricing_description }}"
+                    style="display: block; width: 100%;
+                           box-sizing: border-box; margin-top: 6px;"
+                >
+            </div>
+
+            <div style="margin-top: 28px;">
+                <h2>Included Features</h2>
+                <p>
+                    Edit each of the nine existing feature
+                    labels. Their current order is preserved.
+                </p>
+            </div>
+
+            {% for feature in promotion.features %}
+            <div style="margin-top: 16px;">
+                <label for="cms-promotion-feature-{{ loop.index }}">
+                    <strong>Feature {{ loop.index }}</strong>
+                </label>
+                <input
+                    id="cms-promotion-feature-{{ loop.index }}"
+                    name="feature_{{ loop.index }}"
+                    type="text"
+                    maxlength="100"
+                    required
+                    value="{{ feature }}"
+                    style="display: block; width: 100%;
+                           box-sizing: border-box; margin-top: 6px;"
+                >
+            </div>
+            {% endfor %}
+
+            <div style="margin-top: 28px;">
+                <button type="submit" class="btn">
+                    Save Draft
+                </button>
+            </div>
+
+        </form>
+
+        <p style="margin-top: 20px;">
+            <em>
+                Saving does not publish your changes.
+                Promotion preview, publication review,
+                and revision history will be enabled
+                in later protected development steps.
+            </em>
+        </p>
+
+    </div>
+
+</div>
+
+{% endblock %}
