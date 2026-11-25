@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width:1050px; margin:0 auto; padding:20px;">
+  <a class="btn" href="{{ url_for('master_admin_website_product_editor', product_key=product_key) }}">Back to Product Editor</a>
+  <h1 style="margin:24px 0 12px;">Publication History — {{ product_key|capitalize }}</h1>
+  <p>Only revisions previously published for this product can be restored. This is a private Master Admin page.</p>
+  <p><strong>Currently published revision:</strong>
+    {% if current_revision_id is not none %}{{ current_revision_id }}{% else %}None — original website card is in use{% endif %}
+  </p>
+  <p><strong>Important:</strong> Restoring immediately changes the published product content on Packages and Pricing. It does not change Stripe billing. The private draft remains unchanged.</p>
+  {% if not history %}
+    <p>No previous publication events exist for this product.</p>
+  {% else %}
+    <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse;">
+        <thead><tr><th scope="col">Event</th><th scope="col">Action</th><th scope="col">Revision</th><th scope="col">Previous</th><th scope="col">Admin ID</th><th scope="col">Restore</th></tr></thead>
+        <tbody>
+        {% for event in history %}
+          <tr>
+            <td>{{ event.event_id }}</td>
+            <td>{{ event.action }}</td>
+            <td>{{ event.revision_id }}</td>
+            <td>{{ event.previous_revision_id if event.previous_revision_id is not none else '—' }}</td>
+            <td>{{ event.performed_by }}</td>
+            <td>
+              {% if loop.first and event.revision_id == current_revision_id %}
+                Current
+              {% elif event.revision_id == current_revision_id %}
+                Earlier publication of this revision
+              {% else %}
+                <form method="POST" action="{{ url_for('master_admin_website_product_restore_revision', product_key=product_key) }}">
+                  <input type="hidden" name="security_csrf_token" value="{{ security_csrf_token }}">
+                  <input type="hidden" name="revision_id" value="{{ event.revision_id }}">
+                  <input type="hidden" name="expected_published_revision_id" value="{{ current_revision_id if current_revision_id is not none else '' }}">
+                  <label>Type RESTORE to confirm
+                    <input name="restore_confirmation" autocomplete="off" maxlength="7" pattern="RESTORE" required>
+                  </label>
+                  <button class="btn" type="submit">Restore revision {{ event.revision_id }}</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -5712,6 +5712,90 @@ def _render_public_tenant_home(tenant):
     )
 
 
+def _load_public_marketing_products():
+    """Use published product revisions only; retain static fallback on error."""
+    from services.psp_marketing_cms_public_product import (
+        load_published_products,
+    )
+
+    conn = None
+    products = {}
+    try:
+        conn = get_db_connection()
+        products = load_published_products(conn)
+    except Exception:
+        app.logger.exception(
+            "Published marketing product lookup unavailable; "
+            "retaining existing public product cards."
+        )
+        products = {}
+    finally:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                app.logger.exception(
+                    "Published marketing product read rollback failed."
+                )
+                products = {}
+            try:
+                conn.close()
+            except Exception:
+                app.logger.exception(
+                    "Published marketing product connection close failed."
+                )
+                products = {}
+
+    return products
+
+
+def _load_public_marketing_intro(section_key):
+    """Read a published introduction with static-copy fallback."""
+    from services.psp_marketing_cms_public_intro import (
+        load_published_intro,
+    )
+
+    conn = None
+    published_intro = None
+
+    try:
+        conn = get_db_connection()
+        published_intro = load_published_intro(
+            conn,
+            section_key=section_key,
+        )
+    except Exception:
+        app.logger.exception(
+            "Published marketing introduction unavailable "
+            "for %s; retaining existing public wording.",
+            section_key,
+        )
+        published_intro = None
+    finally:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                app.logger.exception(
+                    "Marketing introduction read rollback "
+                    "failed for %s.",
+                    section_key,
+                )
+                published_intro = None
+
+            try:
+                conn.close()
+            except Exception:
+                app.logger.exception(
+                    "Marketing introduction connection "
+                    "close failed for %s.",
+                    section_key,
+                )
+                published_intro = None
+
+    return published_intro
+
+
 @app.before_request
 def route_public_marketing_site():
     """
@@ -5732,13 +5816,92 @@ def route_public_marketing_site():
         return None
 
     if request.path == "/":
-        return render_template(
-            "public_site/psp_home.html",
-            contact_csrf_token=(
+        from services.psp_marketing_cms_service import (
+            load_home_state,
+        )
+
+        published_hero = None
+        conn = None
+
+        try:
+            conn = get_db_connection()
+            state = load_home_state(conn)
+
+            # Never use draft_content for public rendering.
+            published = state["published_content"]
+
+            if published is not None:
+                hero = (
+                    published.get("hero")
+                    if isinstance(published, dict)
+                    else None
+                )
+
+                limits = {
+                    "primary_button_text": 80,
+                    "secondary_button_text": 80,
+                    "pricing_sentence": 300,
+                }
+
+                if (
+                    not isinstance(hero, dict)
+                    or set(hero) != set(limits)
+                    or any(
+                        not isinstance(hero[key], str)
+                        or not hero[key].strip()
+                        or len(hero[key]) > limit
+                        or "<" in hero[key]
+                        or ">" in hero[key]
+                        or any(
+                            ord(char) < 32
+                            or ord(char) == 127
+                            for char in hero[key]
+                        )
+                        for key, limit in limits.items()
+                    )
+                ):
+                    raise ValueError(
+                        "Invalid stored published Home Page content."
+                    )
+
+                published_hero = hero
+
+        except Exception:
+            app.logger.exception(
+                "Published marketing Home Page unavailable; "
+                "using existing website wording."
+            )
+
+        finally:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    app.logger.exception(
+                        "Marketing Home Page read rollback failed."
+                    )
+
+                try:
+                    conn.close()
+                except Exception:
+                    app.logger.exception(
+                        "Marketing Home Page connection close failed."
+                    )
+
+        context = {
+            "contact_csrf_token": (
                 _public_security_csrf_token(
                     "public_contact"
                 )
             ),
+        }
+
+        if published_hero is not None:
+            context["cms_home_hero"] = published_hero
+
+        return render_template(
+            "public_site/psp_home.html",
+            **context,
         )
 
     if request.path in {
@@ -5746,7 +5909,11 @@ def route_public_marketing_site():
         "/subscription-packages/",
     }:
         return render_template(
-            "public_site/psp_packages.html"
+            "public_site/psp_packages.html",
+            cms_products=_load_public_marketing_products(),
+            cms_intro=_load_public_marketing_intro(
+                "packages.intro"
+            ),
         )
 
     if request.path in {
@@ -5754,7 +5921,11 @@ def route_public_marketing_site():
         "/pricing/",
     }:
         return render_template(
-            "public_site/psp_pricing.html"
+            "public_site/psp_pricing.html",
+            cms_products=_load_public_marketing_products(),
+            cms_intro=_load_public_marketing_intro(
+                "pricing.intro"
+            ),
         )
 
     if request.path in {
@@ -64468,6 +64639,2923 @@ def master_admin_ai_financial():
     finally:
         cur.close()
         conn.close()
+
+
+@app.route(
+    "/master-admin/website/home/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_save_draft():
+    """Save private Home Page content without publishing it."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        save_home_draft,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor_id = session.get("user_id")
+    try:
+        if isinstance(raw_actor_id, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor_id)
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+        expected_revision = int(raw_expected)
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    content = {
+        "hero": {
+            "primary_button_text": request.form.get(
+                "primary_button_text", ""
+            ),
+            "secondary_button_text": request.form.get(
+                "secondary_button_text", ""
+            ),
+            "pricing_sentence": request.form.get(
+                "pricing_sentence", ""
+            ),
+        }
+    }
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = save_home_draft(
+                conn,
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer Home Page draft exists. "
+                "Reload and review it before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Home Page draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+    return redirect(
+        url_for("master_admin_website_management")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/promotion/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_promotion_save_draft():
+    """Save a private Home Page promotion revision only."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        save_section_draft,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    content = {
+        "promotion": {
+            "product_label": request.form.get(
+                "product_label", ""
+            ),
+            "headline": request.form.get(
+                "headline", ""
+            ),
+            "monthly_price": request.form.get(
+                "monthly_price", ""
+            ),
+            "pricing_description": request.form.get(
+                "pricing_description", ""
+            ),
+            "features": [
+                request.form.get(f"feature_{i}", "")
+                for i in range(1, 10)
+            ],
+        }
+    }
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = save_section_draft(
+                conn,
+                section_key="home.promo",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer Product Promotion draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_promotion_editor")
+            )
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_promotion_editor")
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Product Promotion draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_promotion_editor")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/published",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_home_published():
+    """Open the published Home Page in local development."""
+    from flask import make_response
+    from urllib.parse import urlsplit
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+    from services.psp_marketing_cms_content import (
+        normalize_home_content,
+    )
+
+    hostname = urlsplit(
+        "http://" + request.host
+    ).hostname
+
+    # Production must open the real public marketing website.
+    # Never redirect local development to Production.
+    if hostname not in ("127.0.0.1", "localhost", "::1"):
+        return redirect(
+            "https://peachsuitepro.com/",
+            code=302,
+        )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    published_id = state["published_revision_id"]
+    published_content = state["published_content"]
+
+    if (
+        (published_id is None)
+        != (published_content is None)
+    ):
+        abort(500)
+
+    context = {
+        "contact_csrf_token": (
+            _public_security_csrf_token(
+                "public_contact"
+            )
+        ),
+    }
+
+    # Never read draft_content into the published viewer.
+    if published_content is not None:
+        context["cms_home_hero"] = (
+            normalize_home_content(
+                published_content
+            )["hero"]
+        )
+
+    response = make_response(
+        render_template(
+            "public_site/psp_home.html",
+            **context,
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/promotion",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_promotion_editor():
+    """Display the independent private promotion editor."""
+    from services.psp_marketing_cms_content import (
+        normalize_home_promotion_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key="home.promo",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        promotion = normalize_home_promotion_content(
+            state["draft_content"]
+        )["promotion"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        promotion = normalize_home_promotion_content(
+            state["published_content"]
+        )["promotion"]
+        content_source = "published content"
+
+    else:
+        promotion = {
+            "product_label": "Solo",
+            "headline": (
+                "One business. One owner. "
+                "One connected system."
+            ),
+            "monthly_price": "$49",
+            "pricing_description": (
+                "Or $490/year. Start with a 10-day free trial."
+            ),
+            "features": [
+                "Client Management",
+                "Appointment Calendar",
+                "PeachBook",
+                "PeachWeb",
+                "Income & Expenses",
+                "Inventory",
+                "Coach Peach",
+                "Square Integration",
+                "Import & Export",
+            ],
+        }
+        content_source = "existing website wording"
+
+    return render_template(
+        "master_admin_website_promotion.html",
+        promotion=promotion,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/home/peachweb/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachweb_save_draft():
+    """Save a private PeachWeb caption, retaining trusted image data."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+        normalize_home_peachweb_content,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSConfigurationError,
+        MarketingCMSNotFound,
+        load_section_state,
+        save_section_draft,
+    )
+    from services.psp_marketing_cms_cloudinary import (
+        upload_showcase_image,
+    )
+    from services.psp_marketing_cms_media import (
+        MarketingCMSImageError,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    allowed_fields = {
+        "security_csrf_token",
+        "expected_draft_revision_id",
+        "caption",
+        "image_alt",
+    }
+    if set(request.form.keys()) - allowed_fields:
+        abort(400)
+
+    if set(request.files.keys()) - {"showcase_image"}:
+        abort(400)
+
+    uploaded_file = (
+        request.files["showcase_image"]
+        if "showcase_image" in request.files
+        else None
+    )
+    has_upload = (
+        uploaded_file is not None
+        and bool(getattr(uploaded_file, "filename", ""))
+    )
+
+    if has_upload and "image_alt" not in request.form:
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor)
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    if has_upload and not CLOUDINARY_CONFIGURED:
+        flash(
+            "Marketing picture storage is not configured. "
+            "No draft was saved.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_peachweb_editor")
+        )
+
+    conn = get_db_connection()
+    draft_saved = False
+
+    try:
+        try:
+            if has_upload:
+                # Hold this section's row lock across the upload and
+                # the subsequent draft save. Reject stale requests
+                # before any external Cloudinary operation.
+                if conn.autocommit:
+                    raise MarketingCMSConfigurationError(
+                        "Image saving requires a database transaction."
+                    )
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT draft_revision_id
+                        FROM psp_marketing_page_state
+                        WHERE page_key = %s
+                        FOR UPDATE
+                        """,
+                        ("home.peachweb",),
+                    )
+                    locked_row = cur.fetchone()
+
+                if locked_row is None:
+                    raise MarketingCMSNotFound(
+                        "PeachWeb Showcase state is missing."
+                    )
+
+                if locked_row[0] != expected_revision:
+                    raise MarketingCMSConflict(
+                        "This PeachWeb draft has changed."
+                    )
+
+            state = load_section_state(
+                conn,
+                section_key="home.peachweb",
+            )
+
+            if (
+                has_upload
+                and state["draft_revision_id"] != expected_revision
+            ):
+                raise MarketingCMSConflict(
+                    "This PeachWeb draft has changed."
+                )
+
+            if state["draft_content"] is not None:
+                stored_content = state["draft_content"]
+            else:
+                stored_content = state["published_content"]
+
+            if stored_content is not None:
+                trusted_showcase = normalize_home_peachweb_content(
+                    stored_content
+                )["showcase"]
+            else:
+                trusted_showcase = {
+                    "image_public_id": "",
+                    "image_url": "",
+                    "image_alt": "",
+                    "caption": "",
+                }
+
+            candidate = {
+                **trusted_showcase,
+                "caption": request.form.get("caption", ""),
+            }
+
+            if has_upload:
+                # Validation-only reference. It is never uploaded,
+                # saved, or returned to the browser.
+                validation_id = (
+                    "peach-suite-pro/marketing-cms/showcases/"
+                    "peachweb/" + "0" * 32
+                )
+
+                candidate.update({
+                    "image_public_id": validation_id,
+                    "image_url": (
+                        "https://res.cloudinary.com/validation/"
+                        "image/upload/v1/"
+                        f"{validation_id}.jpg"
+                    ),
+                    "image_alt": request.form.get(
+                        "image_alt", ""
+                    ),
+                })
+
+            elif "image_alt" in request.form:
+                # Editing the existing image description does not
+                # permit changing its stored image reference.
+                candidate["image_alt"] = request.form["image_alt"]
+
+            content = normalize_home_peachweb_content({
+                "showcase": candidate,
+            })
+
+            if has_upload:
+                try:
+                    asset = upload_showcase_image(
+                        uploaded_file,
+                        "peachweb",
+                    )
+                except MarketingCMSImageError as exc:
+                    flash(str(exc), "error")
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachweb_editor"
+                        )
+                    )
+                except Exception:
+                    import logging
+                    logging.exception(
+                        "PeachWeb marketing picture upload failed"
+                    )
+                    flash(
+                        "Picture upload failed. "
+                        "No draft was saved. Please try again.",
+                        "error",
+                    )
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachweb_editor"
+                        )
+                    )
+
+                # Only the storage service supplies these values.
+                content["showcase"]["image_public_id"] = (
+                    asset["public_id"]
+                )
+                content["showcase"]["image_url"] = (
+                    asset["secure_url"]
+                )
+
+                content = normalize_home_peachweb_content(content)
+
+            result = save_section_draft(
+                conn,
+                section_key="home.peachweb",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+            draft_saved = True
+
+        except MarketingCMSConflict:
+            flash(
+                "A newer PeachWeb Showcase draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_peachweb_editor")
+            )
+
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_peachweb_editor")
+            )
+
+    finally:
+        try:
+            if not draft_saved:
+                conn.rollback()
+        finally:
+            conn.close()
+
+    flash(
+        "PeachWeb Showcase draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_peachweb_editor")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/peachbook/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachbook_save_draft():
+    """Save a private PeachBook caption, retaining trusted image data."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+        normalize_home_peachbook_content,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSConfigurationError,
+        MarketingCMSNotFound,
+        load_section_state,
+        save_section_draft,
+    )
+    from services.psp_marketing_cms_cloudinary import (
+        upload_showcase_image,
+    )
+    from services.psp_marketing_cms_media import (
+        MarketingCMSImageError,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    allowed_fields = {
+        "security_csrf_token",
+        "expected_draft_revision_id",
+        "caption",
+        "image_alt",
+    }
+    if set(request.form.keys()) - allowed_fields:
+        abort(400)
+
+    if set(request.files.keys()) - {"showcase_image"}:
+        abort(400)
+
+    uploaded_file = (
+        request.files["showcase_image"]
+        if "showcase_image" in request.files
+        else None
+    )
+    has_upload = (
+        uploaded_file is not None
+        and bool(getattr(uploaded_file, "filename", ""))
+    )
+
+    if has_upload and "image_alt" not in request.form:
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor)
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    if has_upload and not CLOUDINARY_CONFIGURED:
+        flash(
+            "Marketing picture storage is not configured. "
+            "No draft was saved.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_peachbook_editor")
+        )
+
+    conn = get_db_connection()
+    draft_saved = False
+
+    try:
+        try:
+            if has_upload:
+                # Hold this section's row lock across the upload and
+                # the subsequent draft save. Reject stale requests
+                # before any external Cloudinary operation.
+                if conn.autocommit:
+                    raise MarketingCMSConfigurationError(
+                        "Image saving requires a database transaction."
+                    )
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT draft_revision_id
+                        FROM psp_marketing_page_state
+                        WHERE page_key = %s
+                        FOR UPDATE
+                        """,
+                        ("home.peachbook",),
+                    )
+                    locked_row = cur.fetchone()
+
+                if locked_row is None:
+                    raise MarketingCMSNotFound(
+                        "PeachBook Showcase state is missing."
+                    )
+
+                if locked_row[0] != expected_revision:
+                    raise MarketingCMSConflict(
+                        "This PeachBook draft has changed."
+                    )
+
+            state = load_section_state(
+                conn,
+                section_key="home.peachbook",
+            )
+
+            if (
+                has_upload
+                and state["draft_revision_id"] != expected_revision
+            ):
+                raise MarketingCMSConflict(
+                    "This PeachBook draft has changed."
+                )
+
+            if state["draft_content"] is not None:
+                stored_content = state["draft_content"]
+            else:
+                stored_content = state["published_content"]
+
+            if stored_content is not None:
+                trusted_showcase = normalize_home_peachbook_content(
+                    stored_content
+                )["showcase"]
+            else:
+                trusted_showcase = {
+                    "image_public_id": "",
+                    "image_url": "",
+                    "image_alt": "",
+                    "caption": "",
+                }
+
+            candidate = {
+                **trusted_showcase,
+                "caption": request.form.get("caption", ""),
+            }
+
+            if has_upload:
+                # Validation-only reference. It is never uploaded,
+                # saved, or returned to the browser.
+                validation_id = (
+                    "peach-suite-pro/marketing-cms/showcases/"
+                    "peachbook/" + "0" * 32
+                )
+
+                candidate.update({
+                    "image_public_id": validation_id,
+                    "image_url": (
+                        "https://res.cloudinary.com/validation/"
+                        "image/upload/v1/"
+                        f"{validation_id}.jpg"
+                    ),
+                    "image_alt": request.form.get(
+                        "image_alt", ""
+                    ),
+                })
+
+            elif "image_alt" in request.form:
+                # Editing the existing image description does not
+                # permit changing its stored image reference.
+                candidate["image_alt"] = request.form["image_alt"]
+
+            content = normalize_home_peachbook_content({
+                "showcase": candidate,
+            })
+
+            if has_upload:
+                try:
+                    asset = upload_showcase_image(
+                        uploaded_file,
+                        "peachbook",
+                    )
+                except MarketingCMSImageError as exc:
+                    flash(str(exc), "error")
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachbook_editor"
+                        )
+                    )
+                except Exception:
+                    import logging
+                    logging.exception(
+                        "PeachBook marketing picture upload failed"
+                    )
+                    flash(
+                        "Picture upload failed. "
+                        "No draft was saved. Please try again.",
+                        "error",
+                    )
+                    return redirect(
+                        url_for(
+                            "master_admin_website_peachbook_editor"
+                        )
+                    )
+
+                # Only the storage service supplies these values.
+                content["showcase"]["image_public_id"] = (
+                    asset["public_id"]
+                )
+                content["showcase"]["image_url"] = (
+                    asset["secure_url"]
+                )
+
+                content = normalize_home_peachbook_content(content)
+
+            result = save_section_draft(
+                conn,
+                section_key="home.peachbook",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+            draft_saved = True
+
+        except MarketingCMSConflict:
+            flash(
+                "A newer PeachBook Showcase draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_peachbook_editor")
+            )
+
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("master_admin_website_peachbook_editor")
+            )
+
+    finally:
+        try:
+            if not draft_saved:
+                conn.rollback()
+        finally:
+            conn.close()
+
+    flash(
+        "PeachBook Showcase draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_peachbook_editor")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/peachbook",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachbook_editor():
+    """Display the private PeachBook showcase editor."""
+    from services.psp_marketing_cms_content import (
+        normalize_home_peachbook_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key="home.peachbook",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        showcase = normalize_home_peachbook_content(
+            state["draft_content"]
+        )["showcase"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        showcase = normalize_home_peachbook_content(
+            state["published_content"]
+        )["showcase"]
+        content_source = "published content"
+
+    else:
+        showcase = {
+            "image_public_id": "",
+            "image_url": "",
+            "image_alt": "",
+            "caption": "",
+        }
+        content_source = "existing website illustration"
+
+    return render_template(
+        "master_admin_website_peachbook.html",
+        showcase=showcase,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/home/peachweb",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachweb_editor():
+    """Display the private PeachWeb showcase editor."""
+    from services.psp_marketing_cms_content import (
+        normalize_home_peachweb_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key="home.peachweb",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        showcase = normalize_home_peachweb_content(
+            state["draft_content"]
+        )["showcase"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        showcase = normalize_home_peachweb_content(
+            state["published_content"]
+        )["showcase"]
+        content_source = "published content"
+
+    else:
+        showcase = {
+            "image_public_id": "",
+            "image_url": "",
+            "image_alt": "",
+            "caption": "",
+        }
+        content_source = "existing website illustration"
+
+    return render_template(
+        "master_admin_website_peachweb.html",
+        showcase=showcase,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/restore/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_restore_review(surface):
+    """Review an eligible historical introduction without writing."""
+    from flask import make_response
+    from services.psp_marketing_cms_intro_history import (
+        load_intro_history,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    raw_id = request.args.get("revision_id")
+
+    if raw_id is None:
+        abort(404)
+
+    raw_id = str(raw_id).strip()
+
+    if (
+        not raw_id
+        or len(raw_id) > 19
+        or not raw_id.isascii()
+        or not raw_id.isdecimal()
+    ):
+        abort(404)
+
+    revision_id = int(raw_id)
+
+    if not 0 < revision_id <= 9223372036854775807:
+        abort(404)
+
+    conn = get_db_connection()
+
+    try:
+        history = load_intro_history(
+            conn,
+            section_key=f"{surface}.intro",
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    published_id = history["published_revision_id"]
+
+    if published_id is None or published_id == revision_id:
+        abort(404)
+
+    target = next(
+        (
+            item
+            for item in history["revisions"]
+            if item["revision_id"] == revision_id
+        ),
+        None,
+    )
+
+    current = next(
+        (
+            item
+            for item in history["revisions"]
+            if item["revision_id"] == published_id
+        ),
+        None,
+    )
+
+    if (
+        target is None
+        or current is None
+        or not target["was_published"]
+        or target["is_published"]
+        or not current["is_published"]
+    ):
+        abort(404)
+
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    response = make_response(
+        render_template(
+            "master_admin_website_intro_restore_review.html",
+            surface=surface,
+            page_label=page_label,
+            target=target,
+            current=current,
+            draft_revision_id=history["draft_revision_id"],
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/restore",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_restore_revision(surface):
+    """Restore a previously published introduction after confirmation."""
+    from services.psp_marketing_cms_intro_publication import (
+        restore_intro_revision,
+    )
+    from services.psp_marketing_cms_publication import (
+        MarketingCMSUnpublishedRevision,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if str(
+        request.form.get("restore_confirmation") or ""
+    ).strip() != "RESTORE":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid administrator")
+
+        actor_id = int(raw_actor)
+
+        if not 0 < actor_id <= 9223372036854775807:
+            raise ValueError("Invalid administrator")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    def required_revision(field):
+        raw = request.form.get(field)
+
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if (
+            not value
+            or len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if not 0 < number <= 9223372036854775807:
+            abort(400)
+
+        return number
+
+    target_revision_id = required_revision("revision_id")
+    expected_published_id = required_revision(
+        "expected_published_revision_id"
+    )
+
+    if target_revision_id == expected_published_id:
+        abort(400)
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = restore_intro_revision(
+                conn,
+                section_key=f"{surface}.intro",
+                actor_id=actor_id,
+                revision_id=target_revision_id,
+                expected_published_revision_id=(
+                    expected_published_id
+                ),
+            )
+        except MarketingCMSUnpublishedRevision:
+            flash(
+                "This introduction revision was never "
+                "published and cannot be restored.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_history",
+                    surface=surface,
+                )
+            )
+        except MarketingCMSConflict:
+            flash(
+                "The published introduction has changed. "
+                "Reload its history and review again.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_history",
+                    surface=surface,
+                )
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Introduction CMS revision "
+        f"{result['revision_id']} restored successfully. "
+        "Your saved draft was preserved. "
+        "Public-page CMS rendering is not yet connected.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "master_admin_website_intro_history",
+            surface=surface,
+        )
+    )
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/history",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_history(surface):
+    """Privately display one introduction's revision history."""
+    from flask import make_response
+    from services.psp_marketing_cms_intro_history import (
+        load_intro_history,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    section_key = f"{surface}.intro"
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    conn = get_db_connection()
+
+    try:
+        history = load_intro_history(
+            conn,
+            section_key=section_key,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(
+        render_template(
+            "master_admin_website_intro_history.html",
+            surface=surface,
+            page_label=page_label,
+            history=history,
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_publish_review(surface):
+    """Privately review one exact introduction draft."""
+    from flask import make_response
+    from services.psp_marketing_cms_page_intro import (
+        normalize_page_intro_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    section_key = f"{surface}.intro"
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_section_state(
+            conn,
+            section_key=section_key,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    draft_id = state["draft_revision_id"]
+    draft_content = state["draft_content"]
+    published_id = state["published_revision_id"]
+    published_content = state["published_content"]
+
+    if (draft_id is None) != (draft_content is None):
+        abort(500)
+
+    if (published_id is None) != (published_content is None):
+        abort(500)
+
+    if draft_id is None:
+        flash(
+            "Save an introduction draft before reviewing "
+            "it for publication.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "master_admin_website_intro_editor",
+                surface=surface,
+            )
+        )
+
+    draft_intro = normalize_page_intro_content(
+        section_key,
+        draft_content,
+    )["intro"]
+
+    published_intro = None
+
+    if published_content is not None:
+        published_intro = normalize_page_intro_content(
+            section_key,
+            published_content,
+        )["intro"]
+
+    response = make_response(
+        render_template(
+            "master_admin_website_intro_publish_review.html",
+            surface=surface,
+            page_label=page_label,
+            draft_revision_id=draft_id,
+            draft_intro=draft_intro,
+            published_revision_id=published_id,
+            published_intro=published_intro,
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/publish",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_publish_draft(surface):
+    """Publish an explicitly confirmed introduction revision."""
+    from services.psp_marketing_cms_intro_publication import (
+        publish_intro_draft,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if str(
+        request.form.get("publish_confirmation") or ""
+    ).strip() != "PUBLISH":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if not 0 < actor_id <= 9223372036854775807:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    def parse_revision(field, *, required):
+        raw = request.form.get(field)
+
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if not value:
+            if required:
+                abort(400)
+            return None
+
+        if (
+            len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if not 0 < number <= 9223372036854775807:
+            abort(400)
+
+        return number
+
+    draft_revision_id = parse_revision(
+        "expected_draft_revision_id",
+        required=True,
+    )
+
+    published_revision_id = parse_revision(
+        "expected_published_revision_id",
+        required=False,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = publish_intro_draft(
+                conn,
+                section_key=f"{surface}.intro",
+                actor_id=actor_id,
+                expected_draft_revision_id=draft_revision_id,
+                expected_published_revision_id=(
+                    published_revision_id
+                ),
+            )
+        except MarketingCMSConflict:
+            flash(
+                "The introduction draft or publication "
+                "has changed. Reload and review it before "
+                "publishing again.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_publish_review",
+                    surface=surface,
+                )
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Introduction CMS revision "
+        f"{result['revision_id']} published successfully. "
+        "Public-page CMS rendering is not yet connected.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "master_admin_website_intro_publish_review",
+            surface=surface,
+        )
+    )
+
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_editor(product_key):
+    """Private editor for one shared subscription product."""
+    from services.psp_marketing_cms_product_content import (
+        normalize_product_content,
+    )
+    from services.psp_marketing_cms_product_form import (
+        blank_product_content,
+        format_feature_headings,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSNotFound,
+        load_section_state,
+    )
+
+    products = {
+        "solo": ("🍑 Solo", "available"),
+        "peachpos": ("🍑 PeachPOS", "available"),
+        "team": ("👥 Team", "coming_soon"),
+        "collective": ("🍑 Peach Collective", "coming_soon"),
+    }
+    if product_key not in products:
+        abort(404)
+
+    section_key = f"product.{product_key}"
+    conn = get_db_connection()
+    try:
+        try:
+            state = load_section_state(
+                conn, section_key=section_key
+            )
+        except MarketingCMSNotFound:
+            flash(
+                "This product CMS section has not been "
+                "provisioned in the database.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    label, default_status = products[product_key]
+
+    if state["draft_content"] is not None:
+        content = normalize_product_content(
+            state["draft_content"]
+        )
+        source = "saved draft"
+        no_snapshot = False
+    elif state["published_content"] is not None:
+        content = normalize_product_content(
+            state["published_content"]
+        )
+        source = "published CMS content"
+        no_snapshot = False
+    else:
+        from services.psp_marketing_cms_product_baseline import (
+            get_product_baseline,
+        )
+        content = get_product_baseline(product_key)
+        source = "original website copy (unsaved baseline)"
+        no_snapshot = True
+
+    return render_template(
+        "master_admin_website_product.html",
+        product_key=product_key,
+        product_label=label,
+        content=content,
+        content_source=source,
+        no_snapshot=no_snapshot,
+        heading_lines=format_feature_headings(
+            content["packages"]["feature_headings"]
+        ),
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_save_draft(product_key):
+    """Save a validated private product draft, without publishing."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_product_form import (
+        parse_product_form,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSNotFound,
+        save_section_draft,
+    )
+
+    if product_key not in (
+        "solo", "peachpos", "team", "collective"
+    ):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+        actor_id = int(raw_actor)
+        if not 0 < actor_id <= 9223372036854775807:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    raw_revision = request.form.get(
+        "expected_draft_revision_id"
+    )
+    if raw_revision is None:
+        abort(400)
+
+    raw_revision = str(raw_revision).strip()
+    if raw_revision:
+        if (
+            len(raw_revision) > 19
+            or not raw_revision.isascii()
+            or not raw_revision.isdecimal()
+        ):
+            abort(400)
+        expected_revision = int(raw_revision)
+        if not 0 < expected_revision <= 9223372036854775807:
+            abort(400)
+    else:
+        expected_revision = None
+
+    editor_url = url_for(
+        "master_admin_website_product_editor",
+        product_key=product_key,
+    )
+
+    try:
+        content = parse_product_form(request.form)
+    except MarketingContentError as exc:
+        flash(str(exc), "error")
+        return redirect(editor_url)
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = save_section_draft(
+                conn,
+                section_key=f"product.{product_key}",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer product draft exists. Reload "
+                "the editor before saving again.",
+                "error",
+            )
+            return redirect(editor_url)
+        except MarketingCMSNotFound:
+            flash(
+                "Product CMS section state is missing.",
+                "error",
+            )
+            return redirect(editor_url)
+    finally:
+        conn.close()
+
+    flash(
+        "Product draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+    return redirect(editor_url)
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_publish_review(product_key):
+    """Preview one private saved product draft before explicit publication."""
+    from flask import make_response
+    from services.psp_marketing_cms_product_content import (
+        normalize_product_content,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSNotFound,
+        load_section_state,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+
+    editor_url = url_for(
+        "master_admin_website_product_editor", product_key=product_key
+    )
+    conn = get_db_connection()
+    try:
+        try:
+            state = load_section_state(conn, section_key=f"product.{product_key}")
+        except MarketingCMSNotFound:
+            flash("The product CMS section has not been provisioned.", "error")
+            return redirect(editor_url)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    draft_id = state["draft_revision_id"]
+    draft_content = state["draft_content"]
+    published_id = state["published_revision_id"]
+    published_content = state["published_content"]
+    if ((draft_id is None) != (draft_content is None)) or (
+        (published_id is None) != (published_content is None)
+    ):
+        abort(500)
+
+    if draft_id is None:
+        flash("Save a private product draft before reviewing for publication.", "error")
+        return redirect(editor_url)
+
+    content = normalize_product_content(draft_content)
+    response = make_response(render_template(
+        "master_admin_website_product_publish_review.html",
+        product_key=product_key,
+        content=content,
+        draft_revision_id=draft_id,
+        published_revision_id=published_id,
+        security_csrf_token=_security_form_csrf_token(),
+    ))
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/publish",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_publish_draft(product_key):
+    """Publish exactly the approved product revision after confirmation."""
+    from services.psp_marketing_cms_content import MarketingContentError
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        MarketingCMSNotFound,
+        MarketingCMSConfigurationError,
+    )
+    from services.psp_marketing_cms_product_publication import (
+        publish_product_draft,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+    if not _security_form_csrf_valid(request.form.get("security_csrf_token")):
+        abort(400)
+    if str(request.form.get("publish_confirmation") or "").strip() != "PUBLISH":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    if isinstance(raw_actor, bool):
+        abort(403)
+    try:
+        actor_id = int(raw_actor)
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+    if not (0 < actor_id <= 9223372036854775807):
+        abort(403)
+
+    def parse_revision(field, *, required):
+        raw = request.form.get(field)
+        if raw is None:
+            abort(400)
+        value = str(raw).strip()
+        if not value and not required:
+            return None
+        if (not value or len(value) > 19 or not value.isascii()
+                or not value.isdecimal()):
+            abort(400)
+        number = int(value)
+        if not (0 < number <= 9223372036854775807):
+            abort(400)
+        return number
+
+    draft_id = parse_revision("expected_draft_revision_id", required=True)
+    published_id = parse_revision("expected_published_revision_id", required=False)
+    editor_url = url_for(
+        "master_admin_website_product_editor", product_key=product_key
+    )
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = publish_product_draft(
+                conn,
+                product_key=product_key,
+                actor_id=actor_id,
+                expected_draft_revision_id=draft_id,
+                expected_published_revision_id=published_id,
+            )
+        except (MarketingCMSConflict, MarketingCMSNotFound,
+                MarketingCMSConfigurationError, MarketingContentError,
+                ValueError) as exc:
+            flash("Product publication was not completed: " + str(exc), "error")
+            return redirect(editor_url)
+    finally:
+        conn.close()
+
+    flash(
+        "Product revision " + str(result["revision_id"])
+        + " published successfully to the marketing CMS. ",
+        "success",
+    )
+    return redirect(editor_url)
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/history",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_history(product_key):
+    """Private, section-scoped publication history for one product."""
+    from flask import make_response
+    from services.psp_marketing_cms_service import (
+        MarketingCMSNotFound, load_section_state,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+
+    editor_url = url_for(
+        "master_admin_website_product_editor", product_key=product_key
+    )
+    page_key = f"product.{product_key}"
+    conn = get_db_connection()
+    try:
+        try:
+            state = load_section_state(conn, section_key=page_key)
+        except MarketingCMSNotFound:
+            flash("Product CMS section is not provisioned.", "error")
+            return redirect(editor_url)
+
+        current_id = state["published_revision_id"]
+        if (current_id is None) != (state["published_content"] is None):
+            abort(500)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT publication_event_id, revision_id,
+                       previous_revision_id, action, performed_by
+                FROM psp_marketing_publication_events
+                WHERE page_key = %s
+                  AND action IN ('publish', 'restore')
+                ORDER BY publication_event_id DESC
+                LIMIT 100
+                """,
+                (page_key,),
+            )
+            history_rows = cur.fetchall()
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    history = [
+        {
+            "event_id": row[0],
+            "revision_id": row[1],
+            "previous_revision_id": row[2],
+            "action": row[3],
+            "performed_by": row[4],
+        }
+        for row in history_rows
+    ]
+    response = make_response(render_template(
+        "master_admin_website_product_history.html",
+        product_key=product_key,
+        current_revision_id=current_id,
+        history=history,
+        security_csrf_token=_security_form_csrf_token(),
+    ))
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.route(
+    "/master-admin/website/products/<product_key>/restore",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_product_restore_revision(product_key):
+    """Restore a previously published product revision after confirmation."""
+    from services.psp_marketing_cms_content import MarketingContentError
+    from services.psp_marketing_cms_product_publication import (
+        MarketingCMSUnpublishedProductRevision,
+        restore_product_revision,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict, MarketingCMSConfigurationError,
+        MarketingCMSNotFound,
+    )
+
+    if product_key not in ("solo", "peachpos", "team", "collective"):
+        abort(404)
+    if not _security_form_csrf_valid(request.form.get("security_csrf_token")):
+        abort(400)
+    if str(request.form.get("restore_confirmation") or "").strip() != "RESTORE":
+        abort(400)
+
+    raw_actor = session.get("user_id")
+    if isinstance(raw_actor, bool):
+        abort(403)
+    try:
+        actor_id = int(raw_actor)
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+    if not (0 < actor_id <= 9223372036854775807):
+        abort(403)
+
+    def revision(field, required):
+        raw = request.form.get(field)
+        if raw is None:
+            abort(400)
+        value = str(raw).strip()
+        if not value and not required:
+            return None
+        if (not value or len(value) > 19 or not value.isascii()
+                or not value.isdecimal()):
+            abort(400)
+        number = int(value)
+        if not (0 < number <= 9223372036854775807):
+            abort(400)
+        return number
+
+    target_id = revision("revision_id", True)
+    expected_id = revision("expected_published_revision_id", False)
+    history_url = url_for(
+        "master_admin_website_product_history", product_key=product_key
+    )
+
+    conn = get_db_connection()
+    try:
+        try:
+            result = restore_product_revision(
+                conn,
+                product_key=product_key,
+                actor_id=actor_id,
+                revision_id=target_id,
+                expected_published_revision_id=expected_id,
+            )
+        except (MarketingCMSConflict, MarketingCMSNotFound,
+                MarketingCMSConfigurationError,
+                MarketingCMSUnpublishedProductRevision,
+                MarketingContentError, ValueError) as exc:
+            flash("Product restoration was not completed: " + str(exc), "error")
+            return redirect(history_url)
+    finally:
+        conn.close()
+
+    flash(
+        "Previously published product revision " + str(result["revision_id"])
+        + " restored successfully.", "success",
+    )
+    return redirect(history_url)
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_editor(surface):
+    """Open the private Packages or Pricing introduction editor."""
+    from services.psp_marketing_cms_page_intro import (
+        normalize_page_intro_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_section_state,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    section_key = f"{surface}.intro"
+    page_label = (
+        "Subscription Packages"
+        if surface == "packages"
+        else "Pricing"
+    )
+
+    conn = get_db_connection()
+
+    try:
+        state = load_section_state(
+            conn,
+            section_key=section_key,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        intro = normalize_page_intro_content(
+            section_key,
+            state["draft_content"],
+        )["intro"]
+        content_source = "saved draft"
+
+    elif state["published_content"] is not None:
+        intro = normalize_page_intro_content(
+            section_key,
+            state["published_content"],
+        )["intro"]
+        content_source = "published content"
+
+    else:
+        intro = {
+            "heading": (
+                "Launch Special — Save 10% on "
+                "Monthly & Yearly Subscriptions!"
+            ),
+            "paragraph": (
+                "Peach Suite Pro Solo and PeachPOS are available "
+                "with a 10-day free trial. Use discount code "
+                "LAUNCH10 when subscribing to save 10% on "
+                "monthly or yearly subscriptions. Enter the "
+                "code in the discount field on the signup form."
+            ),
+        }
+        content_source = "existing website wording"
+
+    return render_template(
+        "master_admin_website_intro.html",
+        surface=surface,
+        page_label=page_label,
+        intro=intro,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/<surface>/intro/save",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_intro_save_draft(surface):
+    """Save a private introduction draft without publishing."""
+    from services.psp_marketing_cms_content import (
+        MarketingContentError,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+        save_section_draft,
+    )
+
+    if surface not in ("packages", "pricing"):
+        abort(404)
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+    except (TypeError, ValueError, OverflowError):
+        abort(403)
+
+    raw_expected = str(
+        request.form.get("expected_draft_revision_id") or ""
+    ).strip()
+
+    if raw_expected:
+        if (
+            len(raw_expected) > 19
+            or not raw_expected.isascii()
+            or not raw_expected.isdecimal()
+        ):
+            abort(400)
+
+        expected_revision = int(raw_expected)
+
+        if expected_revision <= 0:
+            abort(400)
+    else:
+        expected_revision = None
+
+    content = {
+        "intro": {
+            "heading": request.form.get("heading", ""),
+            "paragraph": request.form.get("paragraph", ""),
+        }
+    }
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = save_section_draft(
+                conn,
+                section_key=f"{surface}.intro",
+                content=content,
+                actor_id=actor_id,
+                expected_draft_revision_id=expected_revision,
+            )
+        except MarketingCMSConflict:
+            flash(
+                "A newer introduction draft exists. "
+                "Reload before saving again.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_editor",
+                    surface=surface,
+                )
+            )
+        except MarketingContentError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for(
+                    "master_admin_website_intro_editor",
+                    surface=surface,
+                )
+            )
+    finally:
+        conn.close()
+
+    flash(
+        "Introduction draft saved successfully. "
+        f"Revision {result['revision_number']}. "
+        "The public website has not changed.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "master_admin_website_intro_editor",
+            surface=surface,
+        )
+    )
+
+
+@app.route(
+    "/master-admin/website",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_management():
+    """Display CMS Home Page content for Master Admin only."""
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is not None:
+        home_hero = state["draft_content"]["hero"]
+        content_source = "saved draft"
+    elif state["published_content"] is not None:
+        home_hero = state["published_content"]["hero"]
+        content_source = "published content"
+    else:
+        home_hero = {
+            "primary_button_text": "Start Your 10-Day Free Trial",
+            "secondary_button_text": "View Pricing",
+            "pricing_sentence": (
+                "Solo is $49/month or $490/year "
+                "after the 10-day free trial."
+            ),
+        }
+        content_source = "existing website wording"
+
+    return render_template(
+        "master_admin_website_management.html",
+        home_hero=home_hero,
+        content_source=content_source,
+        draft_revision_id=state["draft_revision_id"],
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/master-admin/website/home/publish",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_publish_draft():
+    """Publish an explicitly confirmed Home Page revision."""
+    from services.psp_marketing_cms_publication import (
+        publish_home_draft,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        str(
+            request.form.get("publish_confirmation") or ""
+        ).strip()
+        != "PUBLISH"
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid actor")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid actor")
+
+    except (TypeError, ValueError):
+        abort(403)
+
+    def parse_revision(field, *, required):
+        raw = request.form.get(field)
+
+        # Both fields must be present. An empty published
+        # revision ID explicitly means nothing is published.
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if not value:
+            if required:
+                abort(400)
+            return None
+
+        if (
+            len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if (
+            number <= 0
+            or number > 9223372036854775807
+        ):
+            abort(400)
+
+        return number
+
+    draft_revision_id = parse_revision(
+        "expected_draft_revision_id",
+        required=True,
+    )
+
+    published_revision_id = parse_revision(
+        "expected_published_revision_id",
+        required=False,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = publish_home_draft(
+                conn,
+                actor_id=actor_id,
+                expected_draft_revision_id=(
+                    draft_revision_id
+                ),
+                expected_published_revision_id=(
+                    published_revision_id
+                ),
+            )
+
+        except MarketingCMSConflict:
+            flash(
+                "The Home Page draft or published "
+                "revision has changed. Reload Website "
+                "Management and review it before "
+                "publishing again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_management")
+            )
+
+    finally:
+        conn.close()
+
+    flash(
+        "Home Page revision "
+        f"{result['revision_id']} published successfully. "
+        "The public Home Page will use this revision.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_management")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/restore",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_restore_revision():
+    """Restore a previously published Home Page revision."""
+    from services.psp_marketing_cms_publication import (
+        MarketingCMSUnpublishedRevision,
+        restore_home_revision,
+    )
+    from services.psp_marketing_cms_service import (
+        MarketingCMSConflict,
+    )
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token")
+    ):
+        abort(400)
+
+    if (
+        str(
+            request.form.get("restore_confirmation") or ""
+        ).strip()
+        != "RESTORE"
+    ):
+        abort(400)
+
+    raw_actor = session.get("user_id")
+
+    try:
+        if isinstance(raw_actor, bool):
+            raise ValueError("Invalid administrator")
+
+        actor_id = int(raw_actor)
+
+        if actor_id <= 0:
+            raise ValueError("Invalid administrator")
+
+    except (TypeError, ValueError):
+        abort(403)
+
+    def parse_required_revision(field):
+        raw = request.form.get(field)
+
+        if raw is None:
+            abort(400)
+
+        value = str(raw).strip()
+
+        if (
+            not value
+            or len(value) > 19
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            abort(400)
+
+        number = int(value)
+
+        if (
+            number <= 0
+            or number > 9223372036854775807
+        ):
+            abort(400)
+
+        return number
+
+    target_revision_id = parse_required_revision(
+        "revision_id"
+    )
+
+    expected_published_id = parse_required_revision(
+        "expected_published_revision_id"
+    )
+
+    if target_revision_id == expected_published_id:
+        abort(400)
+
+    conn = get_db_connection()
+
+    try:
+        try:
+            result = restore_home_revision(
+                conn,
+                actor_id=actor_id,
+                revision_id=target_revision_id,
+                expected_published_revision_id=(
+                    expected_published_id
+                ),
+            )
+
+        except MarketingCMSUnpublishedRevision:
+            flash(
+                "This Home Page revision has never been "
+                "published and cannot be restored.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_home_history")
+            )
+
+        except MarketingCMSConflict:
+            flash(
+                "The currently published Home Page has "
+                "changed. Reload Revision History and "
+                "review it before restoring again.",
+                "error",
+            )
+            return redirect(
+                url_for("master_admin_website_home_history")
+            )
+
+    finally:
+        conn.close()
+
+    flash(
+        "Home Page revision "
+        f"{result['revision_id']} restored successfully. "
+        "The public Home Page will use this revision. "
+        "Your current draft has been preserved.",
+        "success",
+    )
+
+    return redirect(
+        url_for("master_admin_website_home_history")
+    )
+
+
+@app.route(
+    "/master-admin/website/home/restore/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_restore_review():
+    """Review a previously published revision without restoring."""
+    from flask import make_response
+    from services.psp_marketing_cms_history import (
+        load_home_history,
+    )
+
+    raw_revision_id = request.args.get("revision_id")
+
+    if raw_revision_id is None:
+        abort(404)
+
+    raw_revision_id = str(raw_revision_id).strip()
+
+    if (
+        not raw_revision_id
+        or len(raw_revision_id) > 19
+        or not raw_revision_id.isascii()
+        or not raw_revision_id.isdecimal()
+    ):
+        abort(404)
+
+    revision_id = int(raw_revision_id)
+
+    if not 0 < revision_id <= 9223372036854775807:
+        abort(404)
+
+    conn = get_db_connection()
+    try:
+        history = load_home_history(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    current_id = history["published_revision_id"]
+
+    if current_id is None or current_id == revision_id:
+        abort(404)
+
+    target = next(
+        (
+            revision for revision in history["revisions"]
+            if revision["revision_id"] == revision_id
+        ),
+        None,
+    )
+
+    current = next(
+        (
+            revision for revision in history["revisions"]
+            if revision["revision_id"] == current_id
+        ),
+        None,
+    )
+
+    if (
+        target is None
+        or current is None
+        or not target["was_published"]
+        or target["is_published"]
+        or not current["is_published"]
+    ):
+        abort(404)
+
+    response = make_response(
+        render_template(
+            "master_admin_website_restore_review.html",
+            target=target,
+            current=current,
+            draft_revision_id=history["draft_revision_id"],
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/history",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_home_history():
+    """Display read-only Home Page revision and publication history."""
+    from flask import make_response
+    from services.psp_marketing_cms_history import (
+        load_home_history,
+    )
+
+    conn = get_db_connection()
+
+    try:
+        history = load_home_history(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    response = make_response(
+        render_template(
+            "master_admin_website_history.html",
+            history=history,
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/review",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_publish_review():
+    """Review saved Home Page content without publishing."""
+    from flask import make_response
+    from services.psp_marketing_cms_content import (
+        normalize_home_content,
+    )
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if (
+        state["draft_revision_id"] is None
+        or state["draft_content"] is None
+    ):
+        flash(
+            "Save a Home Page draft before "
+            "reviewing it for publication.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_management")
+        )
+
+    draft_hero = normalize_home_content(
+        state["draft_content"]
+    )["hero"]
+
+    published_revision_id = state[
+        "published_revision_id"
+    ]
+    published_content = state["published_content"]
+
+    if (
+        (published_revision_id is None)
+        != (published_content is None)
+    ):
+        abort(500)
+
+    published_hero = None
+
+    if published_content is not None:
+        published_hero = normalize_home_content(
+            published_content
+        )["hero"]
+
+    response = make_response(
+        render_template(
+            "master_admin_website_publish_review.html",
+            draft_revision_id=state["draft_revision_id"],
+            draft_hero=draft_hero,
+            published_revision_id=published_revision_id,
+            published_hero=published_hero,
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/preview",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_home_preview():
+    """Preview a saved Home Page draft without publishing."""
+    from flask import make_response
+    from services.psp_marketing_cms_service import (
+        load_home_state,
+    )
+
+    conn = get_db_connection()
+    try:
+        state = load_home_state(conn)
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if state["draft_content"] is None:
+        flash(
+            "Save a Home Page draft before previewing.",
+            "error",
+        )
+        return redirect(
+            url_for("master_admin_website_management")
+        )
+
+    saved = state["draft_content"]
+    hero = (
+        saved.get("hero")
+        if isinstance(saved, dict)
+        else None
+    )
+
+    required = {
+        "primary_button_text": 80,
+        "secondary_button_text": 80,
+        "pricing_sentence": 300,
+    }
+
+    if (
+        not isinstance(hero, dict)
+        or set(hero) != set(required)
+        or any(
+            not isinstance(hero[key], str)
+            or not hero[key].strip()
+            or len(hero[key]) > maximum
+            or any(ord(char) < 32 for char in hero[key])
+            or "<" in hero[key]
+            or ">" in hero[key]
+            for key, maximum in required.items()
+        )
+    ):
+        abort(500)
+
+    response = make_response(
+        render_template(
+            "public_site/psp_home.html",
+            cms_preview=True,
+            cms_home_hero=hero,
+            contact_csrf_token=_public_security_csrf_token(
+                "public_contact"
+            ),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+def _master_admin_website_showcase_preview(showcase):
+    """Render one private showcase draft in the real homepage layout."""
+    from flask import make_response
+    from services.psp_marketing_cms_showcase_preview import (
+        build_showcase_preview_context,
+    )
+
+    if showcase not in ("peachweb", "peachbook"):
+        abort(404)
+
+    conn = get_db_connection()
+
+    try:
+        context = build_showcase_preview_context(
+            conn,
+            showcase=showcase,
+        )
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    if context is None:
+        flash(
+            f"Save a {showcase} showcase draft before previewing.",
+            "error",
+        )
+        editor = (
+            "master_admin_website_peachweb_editor"
+            if showcase == "peachweb"
+            else "master_admin_website_peachbook_editor"
+        )
+        return redirect(url_for(editor))
+
+    response = make_response(
+        render_template(
+            "public_site/psp_home.html",
+            **context,
+            contact_csrf_token=_public_security_csrf_token(
+                "public_contact"
+            ),
+        )
+    )
+
+    response.headers["Cache-Control"] = (
+        "private, no-store, max-age=0"
+    )
+    response.headers["X-Robots-Tag"] = (
+        "noindex, nofollow"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+    return response
+
+
+@app.route(
+    "/master-admin/website/home/peachweb/preview",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachweb_preview():
+    """Show only the private PeachWeb draft."""
+    return _master_admin_website_showcase_preview("peachweb")
+
+
+@app.route(
+    "/master-admin/website/home/peachbook/preview",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_website_peachbook_preview():
+    """Show only the private PeachBook draft."""
+    return _master_admin_website_showcase_preview("peachbook")
 
 
 @app.route("/master-admin")

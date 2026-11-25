@@ -47,6 +47,11 @@
         <h2 style="margin-top: 25px;">Row 3</h2>
         <div class="narrow-cards">
             {{ section_card(
+                "Website Management",
+                "Manage the public Peach Suite Pro website",
+                url_for('master_admin_website_management')
+            ) }}
+            {{ section_card(
                 "Terms and Conditions", 
                 "Peach Suite Pro - Terms and Conditions", 
                 url_for('view_help_page', page_key='sms_email_terms')
@@ -71,16 +76,15 @@
     <!-- 🔹 HEADER 4 -->
     <h2 style="margin-top: 30px;">Admin - Spa Management</h2>
 
-    <a
-    href="{{ url_for('master_admin_businesses') }}"
-    class="tool-pill tool-pill-small"
-    >
-        Businesses
-    </a>
 
     
 
     <div class="narrow-cards">
+        {{ section_card(
+            "Businesses",
+            "Manage business accounts",
+            url_for('master_admin_businesses')
+        ) }}
         {{ section_card("Admin", "Admin Home", url_for('admin')) }}
         {{ section_card("Spa Management", "Spa Management", url_for('spa_management')) }}
     </div>

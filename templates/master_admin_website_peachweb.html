@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a
+        href="{{ url_for('master_admin_website_management') }}"
+        class="btn"
+    >
+        Back to Website Management
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        Home Page — PeachWeb Showcase
+    </h1>
+
+    <p>
+        Editing {{ content_source }}.
+        Changes to this showcase remain private until published.
+    </p>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Picture &amp; Caption Preview</h2>
+
+        <figure style="margin: 20px 0;">
+
+            {% if showcase.image_url %}
+
+            <img
+                src="{{ showcase.image_url }}"
+                alt="{{ showcase.image_alt }}"
+                style="display: block;
+                       max-width: 100%;
+                       max-height: 420px;
+                       object-fit: contain;
+                       border-radius: 10px;
+                       margin: 0 auto;"
+            >
+
+            {% else %}
+
+            <div
+                role="img"
+                aria-label="PeachWeb picture placeholder"
+                style="min-height: 220px;
+                       border: 1px dashed #aaa;
+                       border-radius: 10px;
+                       display: flex;
+                       align-items: center;
+                       justify-content: center;
+                       padding: 20px;
+                       box-sizing: border-box;
+                       text-align: center;"
+            >
+                No showcase picture selected.
+                The existing public website illustration
+                remains in place.
+            </div>
+
+            {% endif %}
+
+            <figcaption
+                style="margin-top: 16px;
+                       text-align: center;
+                       white-space: pre-line;
+                       overflow-wrap: anywhere;"
+            >{% if showcase.caption %}{{ showcase.caption }}{% else %}No caption entered yet.{% endif %}</figcaption>
+
+        </figure>
+
+    </div>
+
+    <div style="border: 1px solid #bbb;
+                border-radius: 12px;
+                padding: 22px;
+                margin-top: 24px;">
+
+        <h2>Edit PeachWeb Showcase</h2>
+
+        <p>
+            Choose an optional JPG or PNG picture,
+            enter its image description, and edit the
+            caption. Save Draft stores your changes
+            privately without publishing.
+        </p>
+
+        <form
+            method="POST"
+            enctype="multipart/form-data"
+            action="{{ url_for('master_admin_website_peachweb_save_draft') }}"
+        >
+
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <input
+                type="hidden"
+                name="expected_draft_revision_id"
+                value="{{ draft_revision_id if draft_revision_id is not none else '' }}"
+            >
+
+        <div style="margin-top: 20px;">
+
+            <label for="cms-peachweb-image">
+                <strong>Upload New Picture</strong>
+            </label>
+
+            <input
+                id="cms-peachweb-image"
+                name="showcase_image"
+                type="file"
+                accept="image/jpeg,image/png"
+                style="display: block; margin-top: 8px;"
+            >
+
+            <p style="font-size: 0.9em;">
+                Optional JPG or PNG picture, up to 5 MB. An image description is required when uploading a new picture.
+            </p>
+
+        </div>
+
+        <div style="margin-top: 20px;">
+
+            <label for="cms-peachweb-alt">
+                <strong>Image Description</strong>
+            </label>
+
+            <p>
+                Describe what is shown in the picture
+                for visitors using assistive technology.
+            </p>
+
+            <input
+                id="cms-peachweb-alt"
+                name="image_alt"
+                type="text"
+                maxlength="180"
+                value="{{ showcase.image_alt }}"
+                style="display: block;
+                       width: 100%;
+                       box-sizing: border-box;
+                       margin-top: 8px;"
+            >
+
+        </div>
+
+        <div style="margin-top: 20px;">
+
+            <label for="cms-peachweb-caption">
+                <strong>Text Below Picture</strong>
+            </label>
+
+            <p>
+                Text wraps automatically. Press Enter
+                to create a line break.
+            </p>
+
+            <textarea
+                id="cms-peachweb-caption"
+                name="caption"
+                maxlength="350"
+                rows="5"
+                style="display: block;
+                       width: 100%;
+                       box-sizing: border-box;
+                       margin-top: 8px;"
+            >{{ showcase.caption }}</textarea>
+
+        </div>
+
+        <div style="margin-top: 24px;">
+
+            <button
+                type="submit"
+                class="btn"
+            >
+                Save Draft
+            </button>
+
+        </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}

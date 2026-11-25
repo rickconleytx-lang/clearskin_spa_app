@@ -1,0 +1,39 @@
+{# Published product card values. Never read a private draft here. #}
+{% set shared = cms_card_product['shared'] %}
+{% set page = cms_card_product[cms_surface] %}
+{% set live_signup = shared['status'] == 'available' and cms_card_key in ('solo', 'peachpos') %}
+<span class="status {{ 'live' if live_signup else 'coming' }}">{{ shared['bubble_text'] if live_signup or shared['status'] != 'available' else 'Coming Soon' }}</span>
+<h3>{{ shared['name'] }}</h3>
+{% if cms_surface == 'packages' %}
+  <div class="price">{{ shared['monthly_price'] }}{{ shared['monthly_unit'] }} · {{ shared['annual_price'] }}{{ shared['annual_unit'] }}</div>
+  {% if page['top_statement_1'] %}<p class="lead" style="white-space:pre-line;">{{ page['top_statement_1'] }}</p>{% endif %}
+  {% if page['top_statement_2'] %}<p style="white-space:pre-line;">{{ page['top_statement_2'] }}</p>{% endif %}
+  <ul>
+  {% for feature in shared['features'] %}
+    {% set feature_index = loop.index0 %}
+    {% for heading in page['feature_headings'] %}
+      {% if heading['before_feature'] == feature_index %}
+        <li style="list-style:none;"><strong>{{ heading['text'] }}</strong></li>
+      {% endif %}
+    {% endfor %}
+    <li>{{ feature }}</li>
+  {% endfor %}
+  </ul>
+  {% if page['bottom_heading'] or page['bottom_statement'] %}
+    <p style="white-space:pre-line;">{% if page['bottom_heading'] %}<strong>{{ page['bottom_heading'] }}</strong> {% endif %}{{ page['bottom_statement'] }}</p>
+  {% endif %}
+{% else %}
+  <div class="amount"><strong>{{ shared['monthly_price'] }}</strong><span>{{ shared['monthly_unit'] }}</span></div>
+  <div class="annual">{{ shared['annual_price'] }} {{ shared['annual_unit'] }}</div>
+  {% if page['top_statement_2'] %}<div class="annual-note" style="white-space:pre-line;">{{ page['top_statement_2'] }}</div>{% endif %}
+  {% if page['top_statement_1'] %}<p class="summary" style="white-space:pre-line;">{{ page['top_statement_1'] }}</p>{% endif %}
+  <ul>{% for feature in shared['features'][:10] %}<li>{{ feature }}</li>{% endfor %}</ul>
+{% endif %}
+{% if live_signup %}
+  <a class="btn btn-primary" href="{{ '/signup/solo' if cms_card_key == 'solo' else '/signup/pos' }}">{{ page['button_text'] }}</a>
+{% else %}
+  <span class="btn btn-disabled">{{ page['button_text'] }}</span>
+{% endif %}
+{% if cms_surface == 'pricing' and (page['bottom_heading'] or page['bottom_statement']) %}
+  <div class="trial-box" style="white-space:pre-line;">{% if page['bottom_heading'] %}<strong>{{ page['bottom_heading'] }}</strong>{% endif %}{% if page['bottom_statement'] %}<p>{{ page['bottom_statement'] }}</p>{% endif %}</div>
+{% endif %}

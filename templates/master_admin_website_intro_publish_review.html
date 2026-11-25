@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a
+        class="btn"
+        href="{{ url_for('master_admin_website_intro_editor', surface=surface) }}"
+    >
+        Back to Introduction Editor
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        Review {{ page_label }} Introduction
+    </h1>
+
+    <p>
+        Review the saved draft before publishing.
+        Publication requires explicit confirmation.
+    </p>
+
+    <div style="
+        border: 1px solid #bbb;
+        border-radius: 12px;
+        padding: 22px;
+        margin-top: 24px;
+    ">
+
+        <h2>Saved Draft</h2>
+
+        <p>
+            <strong>Draft Revision ID:</strong>
+            {{ draft_revision_id }}
+        </p>
+
+        <div role="note" style="
+            margin: 20px 0;
+            padding: 20px 24px;
+            background: #fff5ef;
+            border: 1px solid #e9c3ae;
+            border-radius: 14px;
+            color: #352e2b;
+        ">
+
+            <strong style="
+                display: block;
+                font-size: 1.15rem;
+                margin-bottom: 8px;
+            ">{{ draft_intro.heading }}</strong>
+
+            <p style="margin: 0; white-space: pre-line;">{{ draft_intro.paragraph }}</p>
+
+        </div>
+
+    </div>
+
+    <div style="
+        border: 1px solid #bbb;
+        border-radius: 12px;
+        padding: 22px;
+        margin-top: 24px;
+    ">
+
+        <h2>Currently Published {{ page_label }} Introduction</h2>
+
+        {% if published_revision_id is not none %}
+
+            <p>
+                <strong>Published Revision ID:</strong>
+                {{ published_revision_id }}
+            </p>
+
+            <div role="note" style="
+                margin: 20px 0;
+                padding: 20px 24px;
+                background: #fff5ef;
+                border: 1px solid #e9c3ae;
+                border-radius: 14px;
+                color: #352e2b;
+            ">
+
+                <strong style="
+                    display: block;
+                    font-size: 1.15rem;
+                    margin-bottom: 8px;
+                ">{{ published_intro.heading }}</strong>
+
+                <p style="margin: 0; white-space: pre-line;">{{ published_intro.paragraph }}</p>
+
+            </div>
+
+        {% else %}
+
+            <p>
+                No CMS introduction revision has been published yet.
+                The public page continues to use its existing
+                promotional wording.
+            </p>
+
+        {% endif %}
+
+    </div>
+
+    <div style="margin-top: 24px;">
+
+        <p>
+            <strong>Publication status:</strong>
+            Nothing changes until you explicitly submit
+            the publication confirmation.
+        </p>
+
+        <p>
+            Publishing updates the CMS publication record.
+            Public-page CMS rendering will be connected separately.
+        </p>
+
+        {% if draft_revision_id != published_revision_id %}
+
+            <form
+                method="POST"
+                action="{{ url_for('master_admin_website_intro_publish_draft', surface=surface) }}"
+                style="
+                    border: 1px solid #bbb;
+                    border-radius: 12px;
+                    padding: 22px;
+                    margin: 24px 0;
+                "
+            >
+
+                <h2>Confirm Publication</h2>
+
+                <p>
+                    You are about to publish the saved
+                    {{ page_label }} introduction revision
+                    <strong>{{ draft_revision_id }}</strong>.
+                </p>
+
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+
+                <input
+                    type="hidden"
+                    name="expected_draft_revision_id"
+                    value="{{ draft_revision_id }}"
+                >
+
+                <input
+                    type="hidden"
+                    name="expected_published_revision_id"
+                    value="{{ published_revision_id if published_revision_id is not none else '' }}"
+                >
+
+                <label for="cms-intro-publish-confirmation">
+                    <strong>Type PUBLISH to confirm</strong>
+                </label>
+
+                <input
+                    id="cms-intro-publish-confirmation"
+                    type="text"
+                    name="publish_confirmation"
+                    required
+                    pattern="PUBLISH"
+                    maxlength="7"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="PUBLISH"
+                    style="
+                        display: block;
+                        width: 100%;
+                        box-sizing: border-box;
+                        max-width: 420px;
+                        margin: 10px 0 20px;
+                    "
+                >
+
+                <button type="submit" class="btn">
+                    Publish This Revision
+                </button>
+
+            </form>
+
+        {% else %}
+
+            <p>
+                This draft revision is already published.
+                Save a new draft to publish additional changes.
+            </p>
+
+        {% endif %}
+
+        <a
+            class="btn"
+            href="{{ url_for('master_admin_website_intro_editor', surface=surface) }}"
+        >
+            Return Without Publishing
+        </a>
+
+    </div>
+
+</div>
+
+{% endblock %}

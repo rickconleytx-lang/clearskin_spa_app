@@ -1053,6 +1053,23 @@
 </head>
 
 <body>
+{% if cms_preview | default(false) %}
+<div role="status"
+     style="position: sticky; top: 0; z-index: 99999;
+            padding: 14px 22px; background: #173f4a;
+            color: white; display: flex; gap: 20px;
+            justify-content: space-between;
+            align-items: center; flex-wrap: wrap;
+            font-family: Arial, sans-serif;">
+    <strong>Master Admin — Draft Preview (Not Published)</strong>
+    <a href="{{ url_for('master_admin_website_management') }}"
+       style="color: white; font-weight: bold;
+              text-decoration: underline;">
+        Back to Website Management
+    </a>
+</div>
+{% endif %}
+
 
 <header class="site-header">
     <div class="container nav">
@@ -1105,16 +1122,16 @@
 
             <div class="hero-actions">
                 <a class="btn btn-primary" href="/signup/solo">
-                    Start Your 10-Day Free Trial
+                    {{ cms_home_hero.primary_button_text if cms_home_hero is defined else 'Start Your 10-Day Free Trial' }}
                 </a>
 
                 <a class="btn btn-secondary" href="/pricing">
-                    View Pricing
+                    {{ cms_home_hero.secondary_button_text if cms_home_hero is defined else 'View Pricing' }}
                 </a>
             </div>
 
             <div class="trial-note">
-                Solo is $49/month or $490/year after the 10-day free trial.
+                {{ cms_home_hero.pricing_sentence if cms_home_hero is defined else 'Solo is $49/month or $490/year after the 10-day free trial.' }}
             </div>
         </div>
 
@@ -1288,6 +1305,16 @@
     <div class="container product-row">
 
         <div class="product-visual">
+            {% if cms_peachweb_showcase is defined and (cms_peachweb_showcase.image_url or cms_peachweb_showcase.caption) %}
+                <figure style="margin: 0; width: 100%; text-align: center;">
+                    {% if cms_peachweb_showcase.image_url %}
+                        <img
+                            src="{{ cms_peachweb_showcase.image_url }}"
+                            alt="{{ cms_peachweb_showcase.image_alt }}"
+                            style="display: block; width: 100%; max-width: 100%; height: auto; max-height: 340px; object-fit: contain; border-radius: 12px;"
+                        >
+                    {% else %}
+
             <div class="mock-window">
                 <div class="mock-bar">
                     <span class="mock-dot"></span>
@@ -1305,6 +1332,33 @@
                     </div>
                 </div>
             </div>
+                    {% endif %}
+                    {% if cms_peachweb_showcase.caption %}
+                        <figcaption style="margin-top: 14px; white-space: pre-line; overflow-wrap: anywhere; line-height: 1.5; color: #f5f5f5; text-align: center;">
+                            {{ cms_peachweb_showcase.caption }}
+                        </figcaption>
+                    {% endif %}
+                </figure>
+            {% else %}
+
+            <div class="mock-window">
+                <div class="mock-bar">
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                </div>
+
+                <div class="mock-content">
+                    <div class="mock-title"></div>
+
+                    <div class="mock-row">
+                        <div class="mock-card"></div>
+                        <div class="mock-card"></div>
+                        <div class="mock-card"></div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <div class="product-copy">
@@ -1342,6 +1396,16 @@
     <div class="container product-row reverse">
 
         <div class="product-visual green">
+            {% if cms_peachbook_showcase is defined and (cms_peachbook_showcase.image_url or cms_peachbook_showcase.caption) %}
+                <figure style="margin: 0; width: 100%; text-align: center;">
+                    {% if cms_peachbook_showcase.image_url %}
+                        <img
+                            src="{{ cms_peachbook_showcase.image_url }}"
+                            alt="{{ cms_peachbook_showcase.image_alt }}"
+                            style="display: block; width: 100%; max-width: 100%; height: auto; max-height: 340px; object-fit: contain; border-radius: 12px;"
+                        >
+                    {% else %}
+
             <div class="mock-window">
                 <div class="mock-bar">
                     <span class="mock-dot"></span>
@@ -1359,6 +1423,33 @@
                     </div>
                 </div>
             </div>
+                    {% endif %}
+                    {% if cms_peachbook_showcase.caption %}
+                        <figcaption style="margin-top: 14px; white-space: pre-line; overflow-wrap: anywhere; line-height: 1.5; color: #f5f5f5; text-align: center;">
+                            {{ cms_peachbook_showcase.caption }}
+                        </figcaption>
+                    {% endif %}
+                </figure>
+            {% else %}
+
+            <div class="mock-window">
+                <div class="mock-bar">
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                </div>
+
+                <div class="mock-content">
+                    <div class="mock-title" style="width:62%;"></div>
+
+                    <div class="mock-row">
+                        <div class="mock-card" style="min-height:130px;"></div>
+                        <div class="mock-card" style="min-height:130px;"></div>
+                        <div class="mock-card" style="min-height:130px;"></div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <div class="product-copy">

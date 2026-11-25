@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">
+
+    <a
+        href="{{ url_for('master_admin_website_management') }}"
+        class="btn"
+    >
+        Back to Website Management
+    </a>
+
+    <h1 style="margin-top: 24px;">
+        {{ page_label }} — Introduction Editor
+    </h1>
+
+    <p>
+        Editing {{ content_source }}.
+        Save Draft stores your changes privately.
+        The public website will not change until published.
+    </p>
+
+    <div style="
+        border: 1px solid #bbb;
+        border-radius: 12px;
+        padding: 22px;
+        margin-top: 24px;
+    ">
+
+        <form
+            method="POST"
+            action="{{ url_for(
+                'master_admin_website_intro_save_draft',
+                surface=surface
+            ) }}"
+        >
+
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <input
+                type="hidden"
+                name="expected_draft_revision_id"
+                value="{{ draft_revision_id if draft_revision_id is not none else '' }}"
+            >
+
+            <div style="margin-top: 12px;">
+
+                <label for="cms-intro-heading">
+                    <strong>Promotional Heading</strong>
+                </label>
+
+                <input
+                    id="cms-intro-heading"
+                    name="heading"
+                    type="text"
+                    maxlength="200"
+                    required
+                    value="{{ intro.heading }}"
+                    style="
+                        display: block;
+                        width: 100%;
+                        box-sizing: border-box;
+                        margin-top: 6px;
+                    "
+                >
+
+            </div>
+
+            <div style="margin-top: 24px;">
+
+                <label for="cms-intro-paragraph">
+                    <strong>Promotional Paragraph</strong>
+                </label>
+
+                <p style="margin: 6px 0;">
+                    Text wraps automatically.
+                    Press Enter to preserve an intentional line break.
+                </p>
+
+                <textarea
+                    id="cms-intro-paragraph"
+                    name="paragraph"
+                    maxlength="1200"
+                    rows="7"
+                    required
+                    style="
+                        display: block;
+                        width: 100%;
+                        box-sizing: border-box;
+                        margin-top: 6px;
+                    "
+                >{{ intro.paragraph }}</textarea>
+
+            </div>
+
+            <div style="margin-top: 28px;">
+                <button type="submit" class="btn">
+                    Save Draft
+                </button>
+            </div>
+
+        </form>
+
+        <div style="margin-top: 18px;">
+            <a class="btn"
+               href="{{ url_for('master_admin_website_intro_history', surface=surface) }}">
+                View Publication History
+            </a>
+        </div>
+
+        {% if draft_revision_id is not none %}
+        <div style="margin-top: 18px;">
+            <a
+                class="btn"
+                href="{{ url_for(
+                    'master_admin_website_intro_publish_review',
+                    surface=surface
+                ) }}"
+            >
+                Review Before Publishing
+            </a>
+
+            <p style="margin-top: 12px;">
+                <em>
+                    Review uses your last saved draft.
+                    Save any new edits before reviewing.
+                </em>
+            </p>
+        </div>
+        {% endif %}
+
+        <p style="margin-top: 20px;">
+            <em>
+                Saving this introduction does not publish changes
+                to Subscription Packages or Pricing.
+            </em>
+        </p>
+
+    </div>
+
+</div>
+
+{% endblock %}
